@@ -83,7 +83,7 @@ async def upload_document(
     if file.content_type != "text/plain":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only text files are allowed")
     
-    if len(file.size) > 1000000:
+    if file.size > 1000000:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File is too large")
 
     content = await file.read()
