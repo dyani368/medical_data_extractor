@@ -1,0 +1,11 @@
+PATIENT CASE REPORT
+Date: 2023-10-15
+Patient ID: 49201-A
+Attending Physician: Dr. Sarah Jenkins
+
+Subject is a 45-year-old male presenting with acute hypertension, dizziness, and mild tachycardia. 
+Medications administered: 
+- Lisinopril 10mg daily 
+- Metoprolol 25mg twice daily
+
+Patient reported a slight headache following the administration of Lisinopril, which resolved after 2 hours. No severe adverse events observed. Follow-up scheduled for two weeks to monitor blood pressure levels.
