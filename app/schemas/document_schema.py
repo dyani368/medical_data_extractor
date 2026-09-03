@@ -18,5 +18,8 @@ class ResultResponse(ExtractionResult):
     class Config:
         from_attributes = True
 
+class SearchRequest(BaseModel):
+    query: str
+
 
     

@@ -1,10 +1,10 @@
 from app.providers.base import LLMProvider
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
+from app.schemas import document_schema
 from dotenv import load_dotenv
 import openai
 from openai import AsyncOpenAI   
-
+import os
 load_dotenv()
 
 client = AsyncOpenAI(

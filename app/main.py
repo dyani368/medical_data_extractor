@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from typing import Annotated
 from pydantic import ValidationError
 
 from fastapi.security import OAuth2PasswordRequestForm
@@ -65,15 +67,41 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
     return new_result
 
 @app.post("/process", response_model=document_schema.ResultResponse)
-async def process_document(request: document_schema.DocumentRequest, db: Session=Depends(get_db), current_user: user_model.User = Depends(get_current_user)):
+async def process_document(
+    request: document_schema.DocumentRequest, 
+    db: Annotated[Session, Depends(get_db)], 
+    current_user: Annotated[user_model.User, Depends(get_current_user)]
+):
     return await run_extraction_pipeline(request.text, "api_upload.txt", db, current_user.id)
 
 @app.post("/upload", response_model=document_schema.ResultResponse)
-async def upload_document(file: UploadFile = File(...), db: Session=Depends(get_db), current_user: user_model.User = Depends(get_current_user)):
+async def upload_document(
+    db: Annotated[Session, Depends(get_db)], 
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+    file: UploadFile = File(...)
+):
     if file.content_type != "text/plain":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only text files are allowed")
 
     content = await file.read()
     text = content.decode("utf-8")
     return await run_extraction_pipeline(text, file.filename, db, current_user.id)
+
+@app.post("/search")
+async def semantic_search(
+    request: document_schema.SearchRequest, 
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[user_model.User, Depends(get_current_user)]
+):
+    query_vector = embed_text(request.query)
     
+    stmt = select(document_model.Document).order_by(
+        document_model.Document.embedding.cosine_distance(query_vector)
+    ).limit(1)
+    
+    similar_docs = db.execute(stmt).scalars().all()
+
+    return [
+        {"id": doc.id, "filename": doc.filename, "content": doc.raw_content} for doc in similar_docs
+    ]
+            
