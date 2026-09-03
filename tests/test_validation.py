@@ -13,7 +13,6 @@ def test_valid_extraction_passes():
     assert result.confidence == 0.95
 
 def test_missing_summary_fails():
-    # This is missing the 'summary' field, it MUST fail
     bad_data = {
         "category": "Adverse Event",
         "key_entities": {},
@@ -23,7 +22,6 @@ def test_missing_summary_fails():
         ExtractionResult(**bad_data)
 
 def test_invalid_category_fails():
-    # The category must be one of the strict Enum options
     bad_data = {
         "summary": "Patient is fine.",
         "category": "Not A Real Category",
@@ -32,3 +30,23 @@ def test_invalid_category_fails():
     }
     with pytest.raises(ValidationError):
         ExtractionResult(**bad_data)
+
+def test_invalid_confidence_type():
+    bad_data = {
+        "summary": "Patient has a headache.",
+        "category": "Adverse Event",
+        "key_entities": {},
+        "confidence": "high" 
+    }
+    with pytest.raises(ValidationError):
+        ExtractionResult(**bad_data)
+
+def test_empty_entities_accepted():
+    valid_data = {
+        "summary": "Patient is fine.",
+        "category": "General",
+        "key_entities": {},
+        "confidence": 0.99
+    }
+    result = ExtractionResult(**valid_data)
+    assert result.key_entities == {}
