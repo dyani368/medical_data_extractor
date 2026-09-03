@@ -4,6 +4,7 @@ from sqlalchemy import ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from typing import List
+from pgvector.sqlalchemy import Vector
 
 class Document(Base):
     __tablename__ = "documents"
@@ -13,6 +14,7 @@ class Document(Base):
     file_url: Mapped[str] = mapped_column(unique=True, nullable=False)
     raw_content: Mapped[str] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=lambda: datetime.now(UTC))
+    embedding: Mapped[Vector] = mapped_column(Vector(384))
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 

@@ -1,22 +1,25 @@
 from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
-import json
+
+from fastapi.security import OAuth2PasswordRequestForm
+from datetime import timedelta
 
 from app.models import document_model, result_model, user_model
 from app.schemas import document_schema, user_schema
-from app.routers import auth
+
 from app.core.database import engine, Base, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
-from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
 from app.core.config import settings
+from app.core.embeddings import embed_text
 
 from app.providers.openai_provider import OpenAIProvider
+from app.routers import auth
 
 import uuid
 import os
 import asyncio
+import json
 
 from dotenv import load_dotenv
 
@@ -34,6 +37,8 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
         raw_content=text,
         user_id=user_id
     )
+
+    new_doc.embedding = embed_text(text)
     db.add(new_doc)
     db.flush()
     
@@ -44,7 +49,7 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
         raise HTTPException(status_code=422, detail=f"LLM returned invalid JSON structure: {e.errors()}")
     except Exception as e:
         print(f"LLM failed after 3 retries: {e}")
-        parsed_data = fallback_result()
+        parsed_data = llm_provider.fallback_result()
 
     new_result = result_model.Result(
         document_id=new_doc.id,
