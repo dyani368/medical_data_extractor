@@ -1,7 +1,5 @@
 name: CI Pipeline
 
-# 1. When should this run? 
-# (Run every time someone pushes code to the main branch)
 on:
   push:
     branches: [ "main" ]
@@ -10,29 +8,25 @@ on:
 
 jobs:
   test:
-    # 2. What kind of computer should the automated bouncer use?
+    
     runs-on: ubuntu-latest
 
     steps:
-    # 3. Download the code from the GitHub repo onto the Ubuntu machine
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # 4. Install Python 3.12 on the machine
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
-        cache: 'pip' # Speeds up future runs
+        cache: 'pip'
 
-    # 5. Install our requirements
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest httpx
 
-    # 6. Run our tests! If this fails, the whole pipeline turns red.
     - name: Run Pytest
       run: |
         pytest tests/ -v
