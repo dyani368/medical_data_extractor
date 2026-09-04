@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import Annotated
 from pydantic import ValidationError
 
@@ -27,7 +27,12 @@ from dotenv import load_dotenv
 
 app = FastAPI()
 app.include_router(auth.router)
+
+with engine.connect() as conn:
+    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    conn.commit()
 Base.metadata.create_all(bind=engine)
+
 load_dotenv()
 
 llm_provider = OpenAIProvider()
