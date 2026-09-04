@@ -5,7 +5,7 @@ An enterprise-grade proof of concept demonstrating automated ingestion, structur
 - **AI-Powered Extraction:** Uses Groq to read unstructured clinical notes and extract structured patient data.
 - **Strict Data Validation:** Enforces strict JSON schemas using Pydantic, ensuring downstream systems only receive clean data.
 - **Defensive Engineering:** Abstracted LLM provider interface with exponential backoff retries and graceful fallback responses for API failures.
-- **Semantic Search:** Embeds clinical text into 1,536-dimensional vectors using HuggingFace and performs high-speed cosine similarity search via `pgvector`.
+- **Semantic Search:** Embeds clinical text into 384-dimensional vectors using HuggingFace and performs high-speed cosine similarity search via `pgvector`.
 - **Event-Driven Orchestration:** Uses N8N to handle webhooks, batch processing schedules, and downstream Slack/Gmail notifications.
 - **Containerized Infrastructure:** Fully deployable via Docker Compose with isolated PostgreSQL, FastAPI, and N8N services.
 

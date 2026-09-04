@@ -1,0 +1,139 @@
+**1-Week Focused Plan** (Campus Placement Ready)
+
+This is realistic for a final-year B.Tech student. ~4–6 focused hours per day. Priority order is based on how much it closes the gap with the Amgen JD.
+
+---
+
+### Day 1–2: Microsoft Copilot Studio + Power Automate (Highest Priority)
+
+**Goal**: Be able to talk confidently about enterprise Copilot and show you understand the Microsoft ecosystem (this is the biggest JD mismatch right now).
+
+**Best Resources** (all free):
+- **Copilot Studio Agent Academy** (Microsoft’s own free curriculum) → https://aka.ms/agent-academy  
+  Start with the **Recruit** track.
+- Microsoft Learn path: “Create agents with Microsoft Copilot Studio – Online Workshop” → https://learn.microsoft.com/en-us/training/paths/power-virtual-agents-workshop/
+- Power Automate basics: Search “Use Copilot in Power Automate” on Microsoft Learn.
+
+**What to actually do**:
+1. Create a free Microsoft account / Power Platform developer environment if you don’t have one.
+2. Build **one simple agent** in Copilot Studio (even a basic FAQ bot).
+3. Create **one Power Automate flow** that does something useful (e.g., when a form is submitted → call an HTTP endpoint or send notification).
+4. Note the difference between:
+   - GitHub Copilot (what you already have)
+   - Microsoft 365 Copilot
+   - Copilot Studio (low-code agents)
+
+**Output by end of Day 2**: Be able to explain in 2 minutes what Copilot Studio is and how it differs from just calling GPT via API.
+
+---
+
+### Day 3: Proper Git Workflow + Collaboration
+
+**Goal**: Move from “I only do add + commit” to real branching + Pull Request workflow.
+
+**Best Resources**:
+- Official GitHub Quickstart for Pull Requests → https://docs.github.com/en/pull-requests/get-started/pull-request-quickstart
+- Interactive visual practice: https://pcottle.github.io/learnGitBranching/ (do the main tutorial levels)
+- First Contributions repo (optional but excellent practice) → https://github.com/firstcontributions/first-contributions
+
+**What to actually do**:
+1. On one of your existing projects (preferably the AI Document POC):
+   - Create a new branch (`git checkout -b feature/improve-chunking` or similar)
+   - Make a small meaningful change
+   - Push the branch
+   - Open a Pull Request on GitHub (even if it’s just you reviewing yourself)
+2. Practice writing a proper commit message and PR description.
+3. Learn these commands properly: `git switch`, `git branch`, `git merge`, `git pull --rebase`, resolving a simple conflict.
+
+**Output**: One real PR link you can show if asked.
+
+---
+
+### Day 4: RAG Deepening – Chunking + Grounding
+
+**Goal**: Strengthen the project you already have so you can speak about it at a deeper level.
+
+You already have embeddings + pgvector + cosine search. Now add the missing conceptual + practical pieces.
+
+**Best Resources**:
+- “RAG Chunking Strategies: The 2026 Benchmark Guide” → https://www.premai.io/blog/rag-chunking-strategies-the-2026-benchmark-guide/
+- LangChain RecursiveCharacterTextSplitter docs (still the practical default)
+- Any short video/article on “grounding” (force the LLM to answer only from retrieved context + cite sources)
+
+**What to actually do**:
+1. Understand and be able to explain:
+   - Fixed-size vs Recursive vs Semantic chunking
+   - Why overlap matters
+   - Typical good starting point in 2026: ~400–512 tokens + 10–20% overlap
+2. In your existing AI Document POC, add or improve chunking (even if you just document what better chunking would look like).
+3. Add simple grounding: In the system prompt, clearly instruct the model “Only answer using the provided context. If the answer is not in the context, say you don’t know.”
+
+**Output**: Be able to explain your RAG pipeline + what you would improve about chunking.
+
+---
+
+### Day 5: Prompt Engineering + Basic Evaluation
+
+**Goal**: Move from “I just call the LLM” to deliberately designing and testing prompts.
+
+**Best Resources**:
+- OpenAI Prompting Fundamentals → https://openai.com/academy/prompting/
+- OpenAI official best practices (still excellent) → search “Best practices for prompt engineering with the OpenAI API”
+- GPT-5 prompting guide (if available on developers.openai.com)
+
+**What to actually do**:
+1. Take the main prompt from your AI Document POC.
+2. Rewrite it properly (clear instructions, role, output format, constraints).
+3. Test edge cases:
+   - Empty document
+   - Contradictory information
+   - Question completely outside the document
+   - Very long / messy input
+4. Add simple evaluation: Manually check 10–15 questions and note where it fails.
+
+**Output**: One improved system prompt + notes on what broke and how you fixed it.
+
+---
+
+### Day 6: Docker Compose + Env Vars + Secrets + Pandas Basics
+
+**Morning – Deployment hygiene** (2–3 hrs)
+- Write a proper `docker-compose.yml` for your AI Document POC (FastAPI + PostgreSQL + optionally Redis/N8N).
+- Move all secrets/API keys into `.env` and load them properly.
+- Make sure you can explain: why we use environment variables, what `.env` is, why we never commit secrets.
+
+**Afternoon – Pandas + SQL revision** (2–3 hrs)
+- Pandas: Read a CSV, handle missing values, basic groupby/filter, convert between DataFrame and records.
+- SQL: Practice joins, GROUP BY + HAVING, window functions (ROW_NUMBER, RANK), basic indexing concepts.
+- Resource: Mode SQL tutorials or LeetCode SQL (easy/medium) + any short Pandas crash course.
+
+---
+
+### Day 7: Integration + Mock Interview Prep
+
+1. Connect the dots:
+   - Update your AI Document POC readme with better architecture explanation.
+   - Mention the improvements you made this week (chunking awareness, better prompts, docker-compose, etc.).
+2. Prepare 3 solid explanations:
+   - Walk through your AI Document POC end-to-end (2–3 mins)
+   - Difference between GitHub Copilot vs Microsoft Copilot Studio
+   - How you would improve the RAG system further
+3. Do one full mock:
+   - Explain projects
+   - Answer “Why Amgen / Why this role?”
+   - Technical questions on FastAPI, PostgreSQL, N8N, RAG, Docker
+
+---
+also: 
+
+understand CI/CD pipelines and for practical exp:
+
+Go to any of your GitHub repos
+Create a folder .github/workflows/
+Add a simple ci.yml that:
+Checks out code
+Sets up Python
+Installs dependencies
+Runs tests (or just pytest / ruff)
+
+Push and watch it run on GitHub
