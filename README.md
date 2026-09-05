@@ -79,3 +79,5 @@ Returns top 3 matching clinical reports
    ```bash
    FastAPI Swagger UI: http://localhost:8000/docs
    N8N Orchestration UI: http://localhost:5678
+
+* Future feature: Advanced Recursive Character Text Splitting
