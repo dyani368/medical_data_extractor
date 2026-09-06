@@ -35,6 +35,7 @@ class OpenAIProvider(LLMProvider):
                                         "The 'confidence' key must be a float between 0.0 and 1.0 representing your confidence in the extraction. "
                                         "The 'category' key MUST be exactly one of the following: 'Adverse Event', 'Case Report', 'Lab Result', or 'General'."
                                         "Example format: {\"summary\": \"...\", \"category\": \"...\", \"key_entities\": {\"age\": 45}, \"confidence\": 0.95}"
+                                        "You must ONLY answer using the provided context. If the answer is not in the context, say 'I do not have enough information'."
                                     )
                                 },
                                 {"role":"user", "content":text}

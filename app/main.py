@@ -15,6 +15,8 @@ from app.core.security import get_current_user, create_access_token, verify_pass
 from app.core.config import settings
 from app.core.embeddings import embed_text
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.providers.openai_provider import OpenAIProvider
 from app.routers import auth
 
@@ -93,7 +95,21 @@ async def upload_document(
 
     content = await file.read()
     text = content.decode("utf-8").replace('\x00', '').strip()
-    return await run_extraction_pipeline(text, file.filename, db, current_user.id)
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
+
+    chunks = text_splitter.split_text(text)
+
+    results = []
+    for i, chunk in enumerate(chunks):
+        chunk_filename = f"{file.filename}_chunk_{i+1}"
+        result = await run_extraction_pipeline(chunk, chunk_filename, db, current_user.id)
+        results.append(result)
+
+    return results[0]
 
 @app.post("/search")
 async def semantic_search(
