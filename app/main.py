@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, text
 from typing import Annotated
@@ -9,6 +10,7 @@ from datetime import timedelta
 
 from app.models import document_model, result_model, user_model
 from app.schemas import document_schema, user_schema
+from app.services import doc_search
 
 from app.core.database import engine, Base, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
@@ -67,7 +69,7 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
         key_entities=parsed_data.key_entities,
         confidence=parsed_data.confidence
     )
-    
+
     db.add(new_result)
     db.commit()
 
@@ -117,15 +119,21 @@ async def semantic_search(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
-    query_vector = embed_text(request.query)
-    
-    stmt = select(document_model.Document).order_by(
-        document_model.Document.embedding.cosine_distance(query_vector)
-    ).limit(1)
-    
-    similar_docs = db.execute(stmt).scalars().all()
-
+    similar_docs = doc_search.generate_relevant_docs(request.query, 1, db)
     return [
         {"id": doc.id, "filename": doc.filename, "content": doc.raw_content} for doc in similar_docs
     ]
-            
+
+@app.post("/chat")
+def chat_stream(
+    request: document_schema.SearchRequest, 
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
+):
+    docs = doc_search.generate_relevant_docs(request.query, 2, db)
+
+    context = "\n\n".join([doc.raw_content for doc in docs]) if docs else "No relevant context found."
+
+    response = llm_provider.generate_chat_stream(context, request.query)
+    return StreamingResponse(response, media_type="text/event-stream")
+

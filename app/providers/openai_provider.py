@@ -35,7 +35,7 @@ class OpenAIProvider(LLMProvider):
                                         "The 'confidence' key must be a float between 0.0 and 1.0 representing your confidence in the extraction. "
                                         "The 'category' key MUST be exactly one of the following: 'Adverse Event', 'Case Report', 'Lab Result', or 'General'."
                                         "Example format: {\"summary\": \"...\", \"category\": \"...\", \"key_entities\": {\"age\": 45}, \"confidence\": 0.95}"
-                                        "You must ONLY answer using the provided context. If the answer is not in the context, say 'I do not have enough information'."
+                                        "You must ONLY answer using the provided context. If the answer is not in the context, you must still return the exact JSON structure, but set the 'summary' to 'Insufficient context', the 'category' to 'General', and the 'confidence' to 0.0."
                                     )
                                 },
                                 {"role":"user", "content":text}
@@ -43,3 +43,29 @@ class OpenAIProvider(LLMProvider):
                             response_format={"type": "json_object"}
                     )
         return response.choices[0].message.content
+    
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APIError)))
+    async def generate_chat_stream(self, context: str,  text: str) -> str:
+        response = await client.chat.completions.create(
+                            model="openai/gpt-oss-20b",
+                            messages=[
+                                {
+                                    "role":"system", 
+                                    "content": (
+                                        "You are a clinical AI assistant. Provide a clear, full-sentence answer based on the medical context. "
+                                        f"Medical context: {context}\n\n"
+                                        "You must ONLY answer using the provided context. If no relevant context is found, reply saying 'I do not have sufficient information to answer this query.'"
+                                    )
+                                },
+                                {"role":"user", "content":text}
+                            ],
+                            stream=True
+                    )
+        
+        async for chunk in response:
+            content = chunk.choices[0].delta.content 
+            if content:
+                yield f"data: {content}\n\n"
+    
+
