@@ -16,6 +16,7 @@ from app.core.database import engine, Base, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
 from app.core.config import settings
 from app.core.embeddings import embed_text
+from app.core.sanitize import sanitize
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -98,12 +99,14 @@ async def upload_document(
     content = await file.read()
     text = content.decode("utf-8").replace('\x00', '').strip()
 
+    sanitized_text = sanitize(text)
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50
     )
 
-    chunks = text_splitter.split_text(text)
+    chunks = text_splitter.split_text(sanitized_text)
 
     results = []
     for i, chunk in enumerate(chunks):
