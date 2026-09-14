@@ -122,7 +122,8 @@ async def semantic_search(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
-    similar_docs = doc_search.generate_relevant_docs(request.query, 1, db)
+    similar_docs = doc_search.generate_relevant_docs(request.query, 1,current_user.id, db, threshold = 0.45)
+
     return [
         {"id": doc.id, "filename": doc.filename, "content": doc.raw_content} for doc in similar_docs
     ]
@@ -133,9 +134,14 @@ def chat_stream(
     current_user: Annotated[user_model.User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
-    docs = doc_search.generate_relevant_docs(request.query, 2, db)
+    docs = doc_search.generate_relevant_docs(request.query, 2,current_user.id, db, threshold=0.45)
 
-    context = "\n\n".join([doc.raw_content for doc in docs]) if docs else "No relevant context found."
+    if not docs:
+        async def no_info_stream():
+            yield "data: No sufficient clinical information found in the approved medical records to answer this query.\n\n"
+        return StreamingResponse(no_info_stream(), media_type="text/event-stream")
+
+    context = "\n\n".join([doc.raw_content for doc in docs])
 
     response = llm_provider.generate_chat_stream(context, request.query)
     return StreamingResponse(response, media_type="text/event-stream")
