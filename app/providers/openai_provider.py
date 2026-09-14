@@ -1,4 +1,5 @@
 from app.providers.base import LLMProvider
+from app.providers.tools import tools
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.schemas import document_schema
 from dotenv import load_dotenv
@@ -11,6 +12,8 @@ client = AsyncOpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1"
 )
+
+
 
 class OpenAIProvider(LLMProvider):
     def fallback_result() -> document_schema.ExtractionResult:
@@ -68,4 +71,27 @@ class OpenAIProvider(LLMProvider):
             if content:
                 yield f"data: {content}\n\n"
     
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APIError)))
+    async def run_agent(self, message):
+
+        system_message = {
+            "role": "system",
+            "content": (
+                "You are a clinical AI assistant. Use the available tools to search medical records and retrieve relevant data when answering queries. "
+                "Synthesize a clear, accurate, full-sentence answer based on the evidence found in the records. "
+                "If no relevant evidence is found, state that you do not have sufficient information."
+            )
+        }
+
+        full_message = [system_message] + message
+                                
+        response = await client.chat.completions.create(
+                            model="openai/gpt-oss-20b",
+                            messages=full_message,
+                            tools=tools
+                    )
+        
+        return response.choices[0].message
 

@@ -11,6 +11,7 @@ from datetime import timedelta
 from app.models import document_model, result_model, user_model
 from app.schemas import document_schema, user_schema
 from app.services import doc_search
+from app.services.agent_service import run_clinical_agent
 
 from app.core.database import engine, Base, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
@@ -128,7 +129,7 @@ async def semantic_search(
         {"id": doc.id, "filename": doc.filename, "content": doc.raw_content} for doc in similar_docs
     ]
 
-@app.post("/chat")
+@app.post("/chat/stream")
 def chat_stream(
     request: document_schema.SearchRequest, 
     current_user: Annotated[user_model.User, Depends(get_current_user)],
@@ -146,3 +147,16 @@ def chat_stream(
     response = llm_provider.generate_chat_stream(context, request.query)
     return StreamingResponse(response, media_type="text/event-stream")
 
+@app.post("/chat/agent")
+async def chat_agent(
+    request: document_schema.SearchRequest, 
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
+):  
+    answer = await run_clinical_agent(
+        query=request.query,
+        user_id=current_user.id,
+        db=db,
+        llm_provider=llm_provider
+    )
+    return {"response": answer}
