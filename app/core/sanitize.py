@@ -23,7 +23,8 @@ trial_subject_pattern = Pattern(name="trial_subj", regex=r"\bSUBJ-[0-9]{4,6}\b",
 trial_subject_recognizer = PatternRecognizer(
     supported_entity="SUBJECT_ID", patterns=[trial_subject_pattern]
 )
-analyzer.registry.add_recognizer(mrn_recognizer, trial_subject_pattern)
+analyzer.registry.add_recognizer(mrn_recognizer)
+analyzer.registry.add_recognizer(trial_subject_recognizer)
 
 def sanitize(text: str):
 
@@ -36,7 +37,7 @@ def sanitize(text: str):
             "DATE_TIME",
             "SSN",
             "LOCATION",
-            "IP_ADDRESS"
+            "IP_ADDRESS",
             "MEDICAL_RECORD_NUMBER",
             "SUBJECT_ID"
         ],
