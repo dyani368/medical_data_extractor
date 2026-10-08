@@ -193,6 +193,3 @@ pytest
 ```
 The suite covers extraction validation, privacy redaction, agent source handling, tenant boundaries in search and job status, and upload validation. It uses test doubles for PostgreSQL, Redis, embeddings, and the external LLM; a live Docker smoke test remains a separate verification step.
 
-## EC2 Deployment Note
-
-Editing this checkout does not update an existing EC2 deployment. A redeploy must copy the updated code, install the new dependencies, and rebuild the API image. Before rebuilding, ensure the EC2 `.env` contains `SECRET_KEY` and `GROQ_API_KEY`; the previous hard-coded JWT secret is gone. N8N now requires the `workflow` profile. The current database schema is created at startup; existing tables are not migrated automatically. Check `/health/ready` after deployment before directing traffic to the new container.
