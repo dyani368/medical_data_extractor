@@ -6,6 +6,7 @@ import pytest
 
 from app import main
 from app.core.security import get_current_user
+from app.services.document_parser import MAX_UPLOAD_BYTES
 
 
 class FakeRedis:
@@ -73,7 +74,7 @@ def test_upload_rejects_invalid_text(client):
         "/upload", headers=headers, files={"file": ("bad.txt", b"\xff", "text/plain")}
     )
     oversized = client.post(
-        "/upload", headers=headers, files={"file": ("big.txt", b"x" * 1_000_001, "text/plain")}
+        "/upload", headers=headers, files={"file": ("big.txt", b"x" * (MAX_UPLOAD_BYTES + 1), "text/plain")}
     )
     assert invalid_utf8.status_code == 400
     assert oversized.status_code == 413
