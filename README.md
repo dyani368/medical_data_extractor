@@ -1,21 +1,22 @@
 # Clinical AI Extraction & Orchestration Pipeline (POC)
 
-An enterprise-grade proof of concept demonstrating automated ingestion, structured data extraction, semantic search, and agentic clinical assistance over clinical trial reports and medical records using Large Language Models (LLMs).
+A portfolio proof of concept demonstrating background ingestion, structured data extraction, semantic search, and clinical question answering over synthetic records. It explores production-oriented patterns but is not validated for clinical use or real patient data.
 
 ---
 
 ## Features
 
-- **AI-Powered Structured Extraction:** Ingests unstructured clinical trial notes and extracts validated, structured medical entities (summary, category, key entities, confidence score) using Groq/OpenAI.
+- **Background Ingestion:** Accepts UTF-8 text and text-based PDFs, extracts PDF text locally, then uses `FastAPI.BackgroundTasks` and Redis job status (`GET /jobs/{job_id}`). A process restart can lose unfinished jobs.
+- **Retry Handling:** An `Idempotency-Key` on `/upload` lets a user retrieve a previously accepted job for 24 hours. This is a best-effort retry mechanism, not exactly-once processing.
+- **AI-Powered Structured Extraction:** Extracts structured fields (summary, category, key entities, confidence score) using Groq and Pydantic validation.
 - **Recursive Document Chunking:** Splits large clinical records using `RecursiveCharacterTextSplitter` (500 characters, 50 overlap) for high-granularity vector storage and retrieval.
-- **Semantic Vector Search:** Embeds clinical text into 384-dimensional dense vectors using HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`) and executes sub-millisecond cosine distance similarity queries via `pgvector`.
-- **Agentic Clinical Tool Calling:** Implements an autonomous clinical agent (`/chat/agent`) that evaluates clinical queries, dynamically dispatches tools through an extensible registry (`TOOL_REGISTRY`), queries the vector database, and synthesizes grounded, evidence-based answers.
-- **Real-Time Token Streaming (SSE):** Delivers low-latency clinical responses (`/chat/stream`) via Server-Sent Events (`text/event-stream`), dropping Time-to-First-Token (TTFT) from seconds to sub-300ms.
-- **Enterprise Authentication & Tenant Isolation:** Stateless JWT authentication (`OAuth2PasswordBearer`) with Bcrypt password hashing; all document embeddings and search results are strictly isolated by authenticated `user_id`.
+- **Semantic Vector Search:** Embeds clinical text into 384-dimensional dense vectors using HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`) and runs cosine distance similarity queries via `pgvector`.
+- **Evidence-Gated Clinical Q&A:** The agent stores a limited conversation history, searches only the authenticated user's records, and withholds clinical answers when no sources were retrieved. Responses include source metadata and ask the model to cite `[doc:ID]` markers.
+- **Token Streaming (SSE):** `/chat/stream` emits a `sources` event followed by answer tokens when retrieval succeeds.
+- **Authentication & Application-Level Isolation:** JWT authentication with Bcrypt password hashing; document searches and conversation lookups are scoped to the authenticated user. The project does not implement database row-level security.
 - **Defensive Engineering & Resilience:** Retries transient LLM failures and rate limits automatically with exponential backoff (`tenacity`) and returns structured fallback schemas if APIs are unreachable.
-- **Input Sanitization:** Protects ingestion pipelines against malicious payloads and prompt injections with automated HTML/text sanitization.
-- **Event-Driven Orchestration:** Integrates N8N for webhook automation, batch ingestion pipelines, and downstream Slack/Email notifications.
-- **Containerized Infrastructure:** Fully reproducible deployment using Docker Compose orchestrating PostgreSQL (with `pgvector`), FastAPI, and N8N.
+- **Optional N8N Service:** Start the `workflow` Compose profile for local N8N experiments; no webhook or notification workflow is included.
+- **Containerized Infrastructure:** Docker Compose defines PostgreSQL with `pgvector`, Redis, FastAPI, readiness checks, and optional N8N. The Dockerfile installs CPU-only PyTorch to avoid CUDA libraries on a CPU host.
 
 ---
 
@@ -24,7 +25,8 @@ An enterprise-grade proof of concept demonstrating automated ingestion, structur
 - **API & Core:** FastAPI, Pydantic v2, SQLAlchemy 2.0, Uvicorn
 - **AI & NLP:** Groq / OpenAI (`AsyncOpenAI`), HuggingFace (`sentence-transformers`), LangChain
 - **Database & Vectors:** PostgreSQL 16 with `pgvector`
-- **Security & Auth:** PyJWT, Passlib (Bcrypt), Bleach
+- **Job State:** Redis (retry keys and job status; not a durable work queue)
+- **Security & Auth:** PyJWT, Passlib (Bcrypt), Presidio-based text redaction
 - **Resilience:** Tenacity (exponential backoff retry policies)
 - **Orchestration:** N8N, Docker & Docker Compose
 - **Testing:** Pytest, Pytest-Asyncio
@@ -33,28 +35,29 @@ An enterprise-grade proof of concept demonstrating automated ingestion, structur
 
 ## Architecture & Flows
 
-### 1. Ingestion & Chunking Flow
+### 1. Asynchronous Ingestion Flow
 ```text
-Client / Doctor
+Demo client
   │
-  │ HTTP POST /upload (Clinical Document)
+  │ HTTP POST /upload (Clinical Document) + Idempotency-Key
   ▼
 FastAPI App
   │
-  ├── 1. Sanitizes text & authenticates user (JWT)
-  ├── 2. RecursiveCharacterTextSplitter chunks text (500 chars / 50 overlap)
-  ├── 3. Generates 384-dim embeddings per chunk (HuggingFace)
-  ├── 4. LLM extracts structured JSON (summary, category, entities, confidence)
+  ├── 1. Checks Redis for an existing user-scoped job via Idempotency Key
+  ├── 2. Creates unique job_id and initializes state in Redis
+  ├── 3. Schedules an in-process background task and returns 202 Accepted
   │
   ▼
-PostgreSQL + pgvector
-  ├── Stores document chunks with embedding vectors
-  └── Stores validated extraction results in relational tables
+In-process background task
+  ├── 1. Sanitizes text & chunks (500 chars / 50 overlap)
+  ├── 2. Generates 384-dim embeddings per chunk (HuggingFace)
+  ├── 3. LLM extracts structured JSON (summary, category, entities, confidence)
+  └── 4. Updates Redis job state (`processing` -> `completed`) and persists to PostgreSQL
 ```
 
 ### 2. Semantic Search Flow
 ```text
-Client (Search Query)
+Authenticated client (Search Query)
   │
   │ POST /search {"query": "patient adverse events on drug X"}
   ▼
@@ -71,41 +74,33 @@ PostgreSQL (pgvector)
 Returns top-k matching clinical document chunks
 ```
 
-### 3. Agentic Tool Calling Flow (`/chat/agent`)
+### 3. Unified Agentic Tool Calling & Streaming Flow (`/chat/stream` & `/chat/agent`)
 ```text
-Clinician Query: "What medications was patient PT-104 prescribed for hypertension?"
+Demo Query: "What medications was patient PT-104 prescribed for hypertension?"
   │
   ▼
-1. FastAPI passes query + Tool Catalog schema to LLM (Groq/OpenAI)
+1. Agent fetches previous conversation context from PostgreSQL (Sliding Window)
   │
   ▼
-2. LLM emits structured tool call:
+2. FastAPI redacts the prompt and passes history + Tool Catalog schema to the LLM
+  │
+  ▼
+3. LLM assesses intent. If medical context needed, emits structured tool call:
    search_medical_records(query="patient PT-104 hypertension medications")
   │
   ▼
-3. Agent Service routes dynamically via TOOL_REGISTRY:
-   - Injects authenticated user_id & DB session
+4. Agent Service records tool execution metadata in PostgreSQL for debugging and review
+  │
+  ▼
+5. Agent Service runs a server-scoped search:
    - Executes pgvector similarity search
-   - Returns raw clinical records as tool response
+   - Returns redacted chunks tagged with `[doc:ID]`
   │
   ▼
-4. LLM receives tool response, synthesizes evidence, and returns final answer:
-   "Patient PT-104 was prescribed Lisinopril 10mg daily on 2026-02-14..."
-```
-
-### 4. Real-Time Streaming Flow (`/chat/stream`)
-```text
-Client (Chat UI)
+6. The response includes source metadata; the streaming endpoint emits it before answer tokens
   │
-  │ POST /chat/stream
   ▼
-FastAPI StreamingResponse
-  │
-  ├── Vector search retrieves top clinical evidence chunks
-  ├── Streams tokens directly from LLM via Server-Sent Events (SSE)
-  │   `data: Lisinopril\n\n`
-  ▼
-Client renders tokens immediately (TTFT < 300ms)
+7. Full response is saved to PostgreSQL Conversation memory
 ```
 
 ---
@@ -117,51 +112,72 @@ Client renders tokens immediately (TTFT < 300ms)
 | `POST` | `/register` | Register a new user (clinician/researcher) | No |
 | `POST` | `/token` | Obtain JWT access token via credentials | No |
 | `GET` | `/me` | Fetch authenticated user profile | Yes (Bearer) |
-| `POST` | `/upload` | Upload & extract structured clinical document | Yes (Bearer) |
+| `POST` | `/upload` | Queue UTF-8 `.txt` or text-based `.pdf` for ingestion | Yes (Bearer) |
+| `GET` | `/jobs/{job_id}` | Poll ingestion status from Redis | Yes (Bearer) |
 | `POST` | `/search` | Semantic vector search across user records | Yes (Bearer) |
-| `POST` | `/chat/stream` | Stream clinical QA answers via Server-Sent Events | Yes (Bearer) |
+| `POST` | `/chat/stream` | Stream clinical QA agent answers via Server-Sent Events | Yes (Bearer) |
 | `POST` | `/chat/agent` | Autonomous clinical agent with dynamic tool calling | Yes (Bearer) |
+| `GET` | `/health/live` | Process liveness | No |
+| `GET` | `/health/ready` | Database and Redis readiness | No |
 
 ---
 
-## Regulatory & Compliance Design (Pharma-Ready)
+## Security Design and Limits
 
-### 1. PHI Pseudonymization & Reversible Token Mapping
-To protect patient privacy under **HIPAA Safe Harbor** and **GDPR**, third-party LLM APIs are treated as untrusted perimeters:
-- **Pre-LLM Tokenization:** Patient identifiers and Medical Record Numbers (MRNs) are intercepted and replaced with deterministic surrogate tokens (e.g., `MRN-928174` $\rightarrow$ `[MRN_TOKEN_X92]`, `Jane Doe` $\rightarrow$ `[SUBJECT_ID_A04]`).
-- **Encrypted Token Vault:** The bidirectional mapping is stored in an encrypted table protected by database Row-Level Security (RLS).
-- **Presentation-Time Detokenization:** LLMs only process de-identified text; surrogate tokens are detokenized into real identifiers only when rendered to an authorized clinician.
+This project uses synthetic examples only. It is a learning exercise informed by clinical data security requirements; it does **not** claim HIPAA, GDPR, or 21 CFR Part 11 compliance.
 
-### 2. Immutable Audit Trailing (21 CFR Part 11)
-To satisfy FDA requirements for electronic records in clinical trials:
-- **Tamper-Evident Telemetry:** An append-only audit table logs all queries, user IDs, ISO timestamps, and exact SHA256 hashes of vector chunks fed to the model.
-- **Deterministic Replay:** Provides full compliance traceability to demonstrate the exact clinical evidence used to generate any diagnosis or recommendation.
+- Implemented: authenticated API access; user-scoped search, conversations, jobs, and retry keys; server-owned user scope for LLM tools; text redaction before persistence and provider calls in both ingestion paths and chat; generic errors that do not echo document text; evidence-gated answers; and tool execution metadata in PostgreSQL.
+- Limits: the request body is processed in memory before redaction. Presidio can miss identifiers or remove useful clinical terms, so its output is not HIPAA Safe Harbor de-identification. Audit rows are mutable, and there is no encrypted token vault, reversible pseudonymization, database RLS, retention policy, or formal risk assessment. Existing database rows from older versions are not retroactively redacted.
+- Work needed before real patient data: perform a documented risk assessment; design data minimization and access controls for every path; validate de-identification or use an appropriate authorized processing arrangement; implement encryption, retention, audit integrity, and operational controls; and obtain organizational/legal review.
+
+| Threat or failure mode | Control in this POC | Evidence |
+|---|---|---|
+| Cross-user record access through model tool arguments | Server owns `user_id`, database session, and result limit | `test_agent_service.py`, `test_doc_search.py` |
+| Cross-user job lookup | Owner ID stored with each job and checked on reads | `test_api_boundaries.py` |
+| Identifiers sent to an external LLM | Redact input before storage and provider calls; redact retrieved chunks again | `test_privacy.py`, `test_extraction_privacy.py`, `test_agent_service.py` |
+| Unsupported clinical answer | Withhold the answer when retrieval returns no sources | `test_agent_service.py` |
+
+This is an engineering exercise, not a compliance assessment. See the [HHS de-identification guidance](https://www.hhs.gov/hipaa/for-professionals/special-topics/de-identification/index.html) for the Safe Harbor and Expert Determination methods, and the [HHS Security Rule overview](https://www.hhs.gov/hipaa/for-professionals/security/index.html) for the broader administrative, physical, and technical safeguards.
 
 ---
 
 ## Quickstart (How to run locally)
 
 ### 1. Prerequisites & Environment Setup
-Clone the repository and create a `.env` file in the root directory:
+Clone the repository, copy `.env.example` to `.env`, and replace the placeholder API key and JWT secret. Compose supplies its own database and Redis URLs to the API container. If you already have a `.env`, add `SECRET_KEY` without replacing the existing values.
 ```bash
 GROQ_API_KEY=gsk_your_key_here
-SECRET_KEY=your_super_secret_jwt_key
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/amgen_db
+SECRET_KEY=replace_with_a_long_random_value
+DATABASE_URL=postgresql://myuser:mypassword@localhost:5432/medical_db
+REDIS_URL=redis://localhost:6379/0
 ```
 
 ### 2. Run with Docker Compose
-Boot up the entire stack (PostgreSQL with `pgvector`, FastAPI API server, and N8N):
+Boot PostgreSQL with `pgvector`, Redis, and the API:
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 Access the services:
 - **FastAPI Swagger Docs:** `http://localhost:8000/docs`
-- **N8N Workflow Automation:** `http://localhost:5678`
+- **Health checks:** `http://localhost:8000/health/live` and `http://localhost:8000/health/ready`
+
+For the optional N8N editor, run `docker compose --profile workflow up -d` and open `http://localhost:5678`.
+
+### Demo walkthrough
+
+Use `/docs` with synthetic text such as `documents/patient_cardio.txt`:
+
+1. Create a user with `POST /register` (password at least 12 characters), then get a bearer token with `POST /token`.
+2. Use **Authorize** in Swagger, upload a file from `output/pdf/` with `POST /upload`, and poll the returned job ID at `GET /jobs/{job_id}`.
+3. Search with `POST /search`, then ask `POST /chat/agent` a question about the record. The response includes `sources` with document IDs and filenames. The streaming endpoint emits the same sources in an SSE `sources` event.
+4. Create a second user and repeat the search. That user cannot read the first user's search results or job status.
 
 ### 3. Run Locally with Virtual Environment
+*(Ensure you have PostgreSQL and Redis running locally)*
 ```bash
-# Activate virtual environment
+# Create and activate a virtual environment
+python -m venv .venv
 .\.venv\Scripts\activate
 
 # Install dependencies
@@ -175,7 +191,8 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 pytest
 ```
-Includes automated unit tests for:
-- Extraction schema validation (`test_validation.py`)
-- Provider fallback & retry handling (`test_providers.py`)
-- Autonomous agent loop and dynamic tool registry (`test_agent_service.py`)
+The suite covers extraction validation, privacy redaction, agent source handling, tenant boundaries in search and job status, and upload validation. It uses test doubles for PostgreSQL, Redis, embeddings, and the external LLM; a live Docker smoke test remains a separate verification step.
+
+## EC2 Deployment Note
+
+Editing this checkout does not update an existing EC2 deployment. A redeploy must copy the updated code, install the new dependencies, and rebuild the API image. Before rebuilding, ensure the EC2 `.env` contains `SECRET_KEY` and `GROQ_API_KEY`; the previous hard-coded JWT secret is gone. N8N now requires the `workflow` profile. The current database schema is created at startup; existing tables are not migrated automatically. Check `/health/ready` after deployment before directing traffic to the new container.

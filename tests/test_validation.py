@@ -50,3 +50,11 @@ def test_empty_entities_accepted():
     }
     result = ExtractionResult(**valid_data)
     assert result.key_entities == {}
+
+
+@pytest.mark.parametrize("confidence", [-0.01, 1.01])
+def test_confidence_must_be_between_zero_and_one(confidence):
+    with pytest.raises(ValidationError):
+        ExtractionResult(
+            summary="Example", category="General", key_entities={}, confidence=confidence
+        )

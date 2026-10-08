@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict  
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 class DocumentRequest(BaseModel):
@@ -10,7 +10,7 @@ class ExtractionResult(BaseModel):
     summary: str
     category: Literal['Adverse Event', 'Case Report', 'Lab Result', 'General']
     key_entities: dict
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
 
 class ResultResponse(ExtractionResult):
     id: int
@@ -21,6 +21,7 @@ class ResultResponse(ExtractionResult):
 
 class SearchRequest(BaseModel):
     query: str
+    conversation_id: int | None = None
 
 
-    
+

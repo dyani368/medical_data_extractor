@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request, BackgroundTasks, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, text
@@ -8,10 +10,10 @@ from pydantic import ValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 
-from app.models import document_model, result_model, user_model
+from app.models import document_model, result_model, user_model, conversation_model, audit_model
 from app.schemas import document_schema, user_schema
 from app.services import doc_search
-from app.services.agent_service import run_clinical_agent
+from app.services.agent_service import run_clinical_agent, run_clinical_agent_stream
 
 from app.core.database import engine, Base, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
@@ -23,6 +25,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.providers.openai_provider import OpenAIProvider
 from app.routers import auth
+from app.services.ingestion_worker import process_document_job
+from app.services.document_parser import MAX_UPLOAD_BYTES, extract_document_text
+from app.core.redis_client import get_redis
 
 import uuid
 import os
@@ -31,22 +36,46 @@ import json
 
 from dotenv import load_dotenv
 
-app = FastAPI()
+def initialize_database():
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    Base.metadata.create_all(bind=engine)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.include_router(auth.router)
 
-with engine.connect() as conn:
-    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    conn.commit()
-Base.metadata.create_all(bind=engine)
+
+@app.get("/health/live")
+def live():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def ready():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        get_redis().ping()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Dependency unavailable")
+    return {"status": "ready"}
 
 load_dotenv()
 
 llm_provider = OpenAIProvider()
 
 async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id: int):
+    text = sanitize(text)
     new_doc = document_model.Document(
-        filename=filename, 
-        file_url=f"local_text_{uuid.uuid4()}", 
+        filename=filename,
+        file_url=f"local_text_{uuid.uuid4()}",
         raw_content=text,
         user_id=user_id
     )
@@ -54,14 +83,14 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
     new_doc.embedding = embed_text(text)
     db.add(new_doc)
     db.flush()
-    
+
     try:
         raw_json_string = await llm_provider.generate(text)
         parsed_data = document_schema.ExtractionResult.model_validate_json(raw_json_string)
-    except ValidationError as e:
-        raise HTTPException(status_code=422, detail=f"LLM returned invalid JSON structure: {e.errors()}")
-    except Exception as e:
-        print(f"LLM failed after 3 retries: {e}")
+    except ValidationError:
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Extraction provider returned invalid output")
+    except Exception:
         parsed_data = llm_provider.fallback_result()
 
     new_result = result_model.Result(
@@ -79,47 +108,57 @@ async def run_extraction_pipeline(text: str, filename: str, db: Session, user_id
 
 @app.post("/process", response_model=document_schema.ResultResponse)
 async def process_document(
-    request: document_schema.DocumentRequest, 
-    db: Annotated[Session, Depends(get_db)], 
+    request: document_schema.DocumentRequest,
+    db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
     return await run_extraction_pipeline(request.text, "api_upload.txt", db, current_user.id)
 
-@app.post("/upload", response_model=document_schema.ResultResponse)
+@app.post("/upload", status_code=202)
 async def upload_document(
-    db: Annotated[Session, Depends(get_db)], 
+    background_tasks: BackgroundTasks,
     current_user: Annotated[user_model.User, Depends(get_current_user)],
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    idempotency_key: str = Header(None)
 ):
-    if file.content_type != "text/plain":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only text files are allowed")
-    
-    if file.size > 1000000:
+    redis = get_redis()
+
+    if idempotency_key:
+        existing_job = redis.get(f"idempotency:{current_user.id}:{idempotency_key}")
+        if existing_job:
+            return {"status": "accepted", "job_id": existing_job, "message": "Duplicate request, returning existing job."}
+
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File is too large")
+    text = extract_document_text(content, file.filename, file.content_type)
+    safe_filename = sanitize(os.path.basename(file.filename or "document"))
 
-    content = await file.read()
-    text = content.decode("utf-8").replace('\x00', '').strip()
+    job_id = str(uuid.uuid4())
+    redis.hset(f"job:{job_id}", mapping={"status": "queued", "progress": "0%", "user_id": current_user.id})
 
-    sanitized_text = sanitize(text)
+    if idempotency_key:
+        redis.setex(f"idempotency:{current_user.id}:{idempotency_key}", 86400, job_id)
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
-    )
+    background_tasks.add_task(process_document_job, job_id, text, safe_filename, current_user.id, llm_provider)
 
-    chunks = text_splitter.split_text(sanitized_text)
+    return {"status": "accepted", "job_id": job_id, "message": "Document ingestion queued for async processing."}
 
-    results = []
-    for i, chunk in enumerate(chunks):
-        chunk_filename = f"{file.filename}_chunk_{i+1}"
-        result = await run_extraction_pipeline(chunk, chunk_filename, db, current_user.id)
-        results.append(result)
+@app.get("/jobs/{job_id}")
+async def get_job_status(
+    job_id: str,
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+):
+    redis = get_redis()
+    job_data = redis.hgetall(f"job:{job_id}")
+    if not job_data or job_data.get("user_id") != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {key: value for key, value in job_data.items() if key != "user_id"}
 
-    return results[0]
 
 @app.post("/search")
 async def semantic_search(
-    request: document_schema.SearchRequest, 
+    request: document_schema.SearchRequest,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
@@ -131,32 +170,30 @@ async def semantic_search(
 
 @app.post("/chat/stream")
 def chat_stream(
-    request: document_schema.SearchRequest, 
+    request: document_schema.SearchRequest,
     current_user: Annotated[user_model.User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
-    docs = doc_search.generate_relevant_docs(request.query, 2,current_user.id, db, threshold=0.45)
-
-    if not docs:
-        async def no_info_stream():
-            yield "data: No sufficient clinical information found in the approved medical records to answer this query.\n\n"
-        return StreamingResponse(no_info_stream(), media_type="text/event-stream")
-
-    context = "\n\n".join([doc.raw_content for doc in docs])
-
-    response = llm_provider.generate_chat_stream(context, request.query)
-    return StreamingResponse(response, media_type="text/event-stream")
-
-@app.post("/chat/agent")
-async def chat_agent(
-    request: document_schema.SearchRequest, 
-    current_user: Annotated[user_model.User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)]
-):  
-    answer = await run_clinical_agent(
+    stream_gen = run_clinical_agent_stream(
         query=request.query,
         user_id=current_user.id,
         db=db,
-        llm_provider=llm_provider
+        llm_provider=llm_provider,
+        conversation_id=request.conversation_id
     )
-    return {"response": answer}
+    return StreamingResponse(stream_gen, media_type="text/event-stream")
+
+@app.post("/chat/agent")
+async def chat_agent(
+    request: document_schema.SearchRequest,
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)]
+):
+    result = await run_clinical_agent(
+        query=request.query,
+        user_id=current_user.id,
+        db=db,
+        llm_provider=llm_provider,
+        conversation_id=request.conversation_id
+    )
+    return result

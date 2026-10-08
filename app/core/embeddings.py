@@ -1,7 +1,12 @@
-from sentence_transformers import SentenceTransformer
+from functools import lru_cache
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+
+@lru_cache(maxsize=1)
+def get_model():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer('all-MiniLM-L6-v2')
 
 def embed_text(text: str) -> list[float]:
-    embedding = model.encode(text)
+    embedding = get_model().encode(text)
     return embedding.tolist()

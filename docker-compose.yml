@@ -1,16 +1,17 @@
-version: '3.8'
-
 services:
   db:
     image: pgvector/pgvector:pg16
-    ports:
-      - "5432:5432"
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=medical_db
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d medical_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   api:
     build: .
@@ -20,18 +21,37 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql://myuser:mypassword@db:5432/medical_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   n8n:
     image: docker.n8n.io/n8nio/n8n
+    profiles: ["workflow"]
     ports:
       - "5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
-      - ./:/data
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:
