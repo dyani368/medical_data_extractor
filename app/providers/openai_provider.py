@@ -73,7 +73,7 @@ class OpenAIProvider(LLMProvider):
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((openai.RateLimitError, openai.APIError)))
-    async def run_agent(self, message):
+    async def run_agent(self, message, require_tool: bool = False):
 
         system_message = {
             "role": "system",
@@ -90,7 +90,8 @@ class OpenAIProvider(LLMProvider):
         response = await client.chat.completions.create(
                             model="openai/gpt-oss-20b",
                             messages=full_message,
-                            tools=tools
+                            tools=tools,
+                            tool_choice="required" if require_tool else "none"
                     )
 
         return response.choices[0].message
@@ -113,6 +114,8 @@ class OpenAIProvider(LLMProvider):
         response = await client.chat.completions.create(
                             model="openai/gpt-oss-20b",
                             messages=full_message,
+                            tools=tools,
+                            tool_choice="none",
                             stream=True
                     )
 

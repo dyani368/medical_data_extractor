@@ -51,7 +51,9 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
     # Get history with sliding window (e.g., last 10 messages) to prevent context bloat
     messages = get_conversation_history(db, conv.id, limit=10)
 
-    response_message = await llm_provider.run_agent(messages)
+    # Retrieval is required for the first model turn. Otherwise a model may answer
+    # directly, which this evidence-gated endpoint must refuse even when records exist.
+    response_message = await llm_provider.run_agent(messages, require_tool=True)
 
     if response_message.tool_calls:
         sources = []
@@ -118,7 +120,7 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
             save_message(db, conv.id, "assistant", NO_EVIDENCE)
             return {"response": NO_EVIDENCE, "conversation_id": conv.id, "sources": []}
 
-        final_message = await llm_provider.run_agent(messages)
+        final_message = await llm_provider.run_agent(messages, require_tool=False)
 
         # Save final assistant response
         save_message(db, conv.id, "assistant", final_message.content)
@@ -136,7 +138,7 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
     save_message(db, conv.id, "user", query)
     messages = get_conversation_history(db, conv.id, limit=10)
 
-    response_message = await llm_provider.run_agent(messages)
+    response_message = await llm_provider.run_agent(messages, require_tool=True)
 
     if response_message.tool_calls:
         sources = []
