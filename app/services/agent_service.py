@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models.document_model import Document
 from app.services import doc_search
+from app.services import agent_tools
 from app.services.conversation_service import get_or_create_conversation, get_conversation_history, save_message
 from app.models.audit_model import AgentAuditLog
 
@@ -14,7 +15,9 @@ def redact_text(text: str) -> str:
     return sanitize(text)
 
 TOOL_REGISTRY = {
-    "search_medical_records": doc_search.generate_relevant_docs,
+    "search_medical_records": True,
+    "get_extraction_result": True,
+    "get_related_document_chunks": True,
 }
 
 NO_EVIDENCE = "I do not have sufficient information in the available records to answer this query."
@@ -83,6 +86,22 @@ def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Sess
         search_query = query
     return {"query": search_query, "limit": 5, "user_id": user_id, "db": db}
 
+
+def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, db: Session):
+    args = agent_tools.parse_arguments(raw_arguments)
+    if name == "search_medical_records":
+        kwargs = search_tool_arguments(raw_arguments, query, user_id, db)
+        return format_search_results(doc_search.generate_relevant_docs(**kwargs))
+    document_id = args.get("document_id")
+    if isinstance(document_id, bool) or not isinstance(document_id, int):
+        return "A valid document_id from your search results is required.", []
+    if name == "get_extraction_result":
+        content, sources = agent_tools.get_extraction_result(document_id, user_id, db)
+        return redact_text(content), sources
+    if name == "get_related_document_chunks":
+        return format_search_results(agent_tools.get_related_document_chunks(document_id, user_id, db))
+    return "Unsupported tool.", []
+
 async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None) -> dict:
     query = redact_text(query)
     conv = get_or_create_conversation(db, user_id, conversation_id)
@@ -125,11 +144,8 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
         })
 
         for tool_call in response_message.tool_calls:
-            handler = TOOL_REGISTRY.get(tool_call.function.name)
-
-            if handler:
-                kwargs = search_tool_arguments(tool_call.function.arguments, query, user_id, db)
-                arguments = {"query": kwargs["query"]}
+            if tool_call.function.name in TOOL_REGISTRY:
+                arguments = agent_tools.parse_arguments(tool_call.function.arguments)
 
                 start_time = time.time()
                 audit_log = AgentAuditLog(
@@ -142,8 +158,9 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
                 db.add(audit_log)
 
                 try:
-                    docs = handler(**kwargs)
-                    tool_result, found_sources = format_search_results(docs)
+                    tool_result, found_sources = execute_agent_tool(
+                        tool_call.function.name, tool_call.function.arguments, query, user_id, db
+                    )
                     sources.extend(found_sources)
                     sources = list({source["document_id"]: source for source in sources}.values())
                     audit_log.outputs = {"status": "success", "length": len(tool_result)}
@@ -226,10 +243,8 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
         })
 
         for tool_call in response_message.tool_calls:
-            handler = TOOL_REGISTRY.get(tool_call.function.name)
-            if handler:
-                kwargs = search_tool_arguments(tool_call.function.arguments, query, user_id, db)
-                arguments = {"query": kwargs["query"]}
+            if tool_call.function.name in TOOL_REGISTRY:
+                arguments = agent_tools.parse_arguments(tool_call.function.arguments)
 
                 start_time = time.time()
                 audit_log = AgentAuditLog(
@@ -242,8 +257,9 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
                 db.add(audit_log)
 
                 try:
-                    docs = handler(**kwargs)
-                    tool_result, found_sources = format_search_results(docs)
+                    tool_result, found_sources = execute_agent_tool(
+                        tool_call.function.name, tool_call.function.arguments, query, user_id, db
+                    )
                     sources.extend(found_sources)
                     sources = list({source["document_id"]: source for source in sources}.values())
                     audit_log.outputs = {"status": "success", "length": len(tool_result)}

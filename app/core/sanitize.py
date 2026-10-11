@@ -51,6 +51,21 @@ def sanitize(text: str):
         language="en",
     )
 
+    # spaCy can label capitalized product names as PERSON. Preserve a detected
+    # name when it immediately follows a medication/treatment noun phrase.
+    medication_context = re.compile(
+        r"\b(?:study\s+)?(?:medication|medicine|drug|therapy|treatment)"
+        r"(?:\s+(?:named|called))?\s*$", re.IGNORECASE
+    )
+    results = [
+        result for result in results
+        if not (
+            result.entity_type == "PERSON"
+            and re.search(r"[a-z][A-Z]", text[result.start:result.end])
+            and medication_context.search(text[max(0, result.start - 50):result.start])
+        )
+    ]
+
     redacted = AnonymizerEngine().anonymize(text=text, analyzer_results=results).text
     redacted = re.sub(r"\b(?:19|20)\d{2}[-/]\d{1,2}[-/]\d{1,2}\b", "<DATE>", redacted)
     redacted = re.sub(r"\b\d{1,2}[-/]\d{1,2}[-/](?:19|20)\d{2}\b", "<DATE>", redacted)

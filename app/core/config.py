@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+    job_retention_seconds: int = 2_592_000  # 30 days; idempotency keys expire after 24h.
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

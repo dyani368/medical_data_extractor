@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request, BackgroundTasks, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import select, text
+from sqlalchemy import select
 from typing import Annotated
 from pydantic import ValidationError
 
@@ -15,7 +16,7 @@ from app.schemas import document_schema, user_schema
 from app.services import doc_search
 from app.services.agent_service import run_clinical_agent, run_clinical_agent_stream
 
-from app.core.database import engine, Base, get_db
+from app.core.database import engine, get_db
 from app.core.security import get_current_user, create_access_token, verify_password, get_password_hash
 from app.core.config import settings
 from app.core.embeddings import embed_text
@@ -37,9 +38,12 @@ from dotenv import load_dotenv
 
 
 def initialize_database():
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.create_all(bind=engine)
+    from alembic import command
+    from alembic.config import Config
+
+    migration_config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    migration_config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+    command.upgrade(migration_config, "head")
 
 
 @asynccontextmanager
@@ -136,6 +140,9 @@ async def upload_document(
 
     job_id = str(uuid.uuid4())
     redis.hset(f"job:{job_id}", mapping={"status": "queued", "progress": "0%", "user_id": current_user.id})
+    expire_job = getattr(redis, "expire", None)
+    if expire_job:
+        expire_job(f"job:{job_id}", settings.job_retention_seconds)
 
     if idempotency_key:
         redis.setex(f"idempotency:{current_user.id}:{idempotency_key}", 86400, job_id)

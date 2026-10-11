@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.models import document_model, result_model
 from app.schemas import document_schema
 from app.core.embeddings import embed_text
+from app.core.config import settings
 from pydantic import ValidationError
 
 async def process_document_job(job_id: str, text: str, filename: str, user_id: int, llm_provider):
@@ -66,4 +67,5 @@ async def process_document_job(job_id: str, text: str, filename: str, user_id: i
     except Exception as e:
         redis.hset(f"job:{job_id}", mapping={"status": "failed", "error": type(e).__name__})
     finally:
+        redis.expire(f"job:{job_id}", settings.job_retention_seconds)
         db.close()

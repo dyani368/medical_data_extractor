@@ -47,9 +47,13 @@ The pipeline is designed around defense-in-depth security principles:
 - **Idempotency Support:** Supports `Idempotency-Key` headers on `/upload` to safely handle client retries.
 - **Automated PII/PHI Redaction:** Integrates Microsoft Presidio for automated text sanitization prior to model provider transmission and persistence.
 - **Recursive Chunking & Embeddings:** Documents are partitioned via `RecursiveCharacterTextSplitter` (500-char chunks, 50 overlap) and embedded into 384-dimensional dense vectors using HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`).
-- **Semantic Vector Search:** High-performance cosine similarity search powered by PostgreSQL with `pgvector`, partitioned by tenant.
+- **Hybrid Search:** Tenant-scoped `pgvector` and PostgreSQL full-text rankings fused for candidate passage retrieval.
 - **Autonomous Clinical Agent & Tool Calling:** Dynamically calls vector search tools with server-enforced user boundaries and returns responses with document citations (`[doc:ID]`).
-- **Server-Sent Events (SSE) Streaming:** `/chat/stream` streams answer tokens in real time after emitting retrieval source metadata.
+- **Server-Sent Events (SSE) Streaming:** `/chat/stream` streams answer tokens in real time, then emits cited source metadata.
+- **Focused agent tools:** Search passages, retrieve a saved extraction, and load neighboring chunks from a retrieved document; every lookup uses the authenticated user scope.
+- **Retention:** Redis upload-job status expires after 30 days and idempotency keys after 24 hours. Uploaded records and conversations persist until manual administrative deletion; this demo has no user-facing delete endpoint yet.
+- **Schema migrations:** Alembic applies versioned schema migrations at API startup. Existing deployments are baselined against their existing tables; future schema changes belong in a new migration revision.
+- To apply versioned schema changes manually, install `requirements.txt` and run `alembic upgrade head` from the project root. The first revision records the current schema without dropping existing tables or data.
 - **Tenant Isolation:** Enforced JWT authentication with Bcrypt password hashing. Database queries and tool invocations strictly bind `user_id` on the backend.
 - **Resilience & Fallbacks:** Employs exponential backoff retry policies (`tenacity`) for external LLM API calls with graceful structured fallbacks.
 

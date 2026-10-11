@@ -112,6 +112,8 @@ class OpenAIProvider(LLMProvider):
                 "For follow-ups, resolve references such as 'the patient' using the conversation. "
                 "Reuse retrieved passages when sufficient. When searching, write a standalone query "
                 "including the relevant document/topic from the conversation, without inventing facts. "
+                "Use get_extraction_result for requested saved extraction fields. Use "
+                "get_related_document_chunks when a matching passage is split across chunks. "
                 "If no relevant evidence is found, state that you do not have sufficient information."
             )
         }
