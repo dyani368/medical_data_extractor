@@ -75,14 +75,14 @@ async def test_model_cannot_override_user_scope_or_search_limit(monkeypatch, con
             "sources": [{"document_id": 10, "filename": "owned.txt"}],
         }
 
-    search.assert_called_once_with(query="headache", limit=2, user_id=42, db=db)
+    search.assert_called_once_with(query="headache", limit=5, user_id=42, db=db)
 
 
 @pytest.mark.parametrize("arguments", ["not-json", "[]", '{"query": 123}'])
 def test_invalid_tool_arguments_use_the_original_query(arguments):
     db = object()
     assert agent_service.search_tool_arguments(arguments, "original", 42, db) == {
-        "query": "original", "limit": 2, "user_id": 42, "db": db,
+        "query": "original", "limit": 5, "user_id": 42, "db": db,
     }
 
 

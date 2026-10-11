@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 import openai
 from openai import AsyncOpenAI
 import os
+import json
+import uuid
+from openai.types.chat import ChatCompletionMessage
 load_dotenv()
 
 client = AsyncOpenAI(
@@ -90,12 +93,29 @@ class OpenAIProvider(LLMProvider):
 
         full_message = [system_message] + message
 
-        response = await client.chat.completions.create(
+        try:
+            response = await client.chat.completions.create(
                             model="openai/gpt-oss-20b",
                             messages=full_message,
                             tools=tools,
                             tool_choice="auto" if require_tool is None else ("required" if require_tool else "none")
                     )
+        except openai.BadRequestError as error:
+            body = error.body if isinstance(error.body, dict) else {}
+            detail = body.get("error", body)
+            code = detail.get("code") if isinstance(detail, dict) else None
+            if code != "tool_use_failed" or require_tool is False:
+                raise
+            # Groq can reject malformed model-generated calls. Never execute the
+            # failed generation: fall back to our sole registered search with the
+            # current user question. Tenant scope is still injected by the server.
+            query = next((item.get("content", "") for item in reversed(message)
+                          if item.get("role") == "user"), "")
+            return ChatCompletionMessage(role="assistant", content=None, tool_calls=[{
+                "id": "fallback_" + uuid.uuid4().hex,
+                "type": "function",
+                "function": {"name": "search_medical_records", "arguments": json.dumps({"query": query})},
+            }])
 
         return response.choices[0].message
 

@@ -162,7 +162,7 @@ async def semantic_search(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
-    similar_docs = doc_search.generate_relevant_docs(request.query, 1,current_user.id, db, threshold = 0.45)
+    similar_docs = doc_search.generate_relevant_docs(request.query, 5, current_user.id, db)
 
     return [
         {"id": doc.id, "filename": doc.filename, "content": doc.raw_content} for doc in similar_docs

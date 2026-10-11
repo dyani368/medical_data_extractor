@@ -64,7 +64,7 @@ def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Sess
     search_query = arguments.get("query")
     if not isinstance(search_query, str) or not search_query.strip():
         search_query = query
-    return {"query": search_query, "limit": 2, "user_id": user_id, "db": db}
+    return {"query": search_query, "limit": 5, "user_id": user_id, "db": db}
 
 async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None) -> dict:
     query = redact_text(query)
@@ -124,6 +124,7 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
                     docs = handler(**kwargs)
                     tool_result, found_sources = format_search_results(docs)
                     sources.extend(found_sources)
+                    sources = list({source["document_id"]: source for source in sources}.values())
                     audit_log.outputs = {"status": "success", "length": len(tool_result)}
                 except Exception as e:
                     db.rollback()
@@ -217,6 +218,7 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
                     docs = handler(**kwargs)
                     tool_result, found_sources = format_search_results(docs)
                     sources.extend(found_sources)
+                    sources = list({source["document_id"]: source for source in sources}.values())
                     audit_log.outputs = {"status": "success", "length": len(tool_result)}
                 except Exception as e:
                     db.rollback()
