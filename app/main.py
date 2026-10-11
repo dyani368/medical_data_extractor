@@ -45,21 +45,17 @@ def initialize_database():
     migration_config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
     command.upgrade(migration_config, "head")
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
     yield
 
-
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth.router)
-
 
 @app.get("/health/live")
 def live():
     return {"status": "ok"}
-
 
 @app.get("/health/ready")
 def ready():

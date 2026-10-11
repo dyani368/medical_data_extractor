@@ -1,0 +1,42 @@
+{
+  "search": {
+    "successful_requests": 40,
+    "median_latency_ms": 1709.2,
+    "p95_latency_ms": 3909.7
+  },
+  "agent": {
+    "successful_requests": 38,
+    "median_latency_ms": 9235.9,
+    "p95_latency_ms": 21491.6
+  },
+  "retrieval_hit_at_5": {
+    "hits": 25,
+    "answerable_questions": 29,
+    "rate": 0.8621
+  },
+  "answer_correct": {
+    "yes": 30,
+    "partial": 3,
+    "no": 7,
+    "ungraded": 0
+  },
+  "refusal_correct": {
+    "yes": 32,
+    "partial": 1,
+    "no": 7,
+    "ungraded": 0
+  },
+  "citation_supported": {
+    "yes": 23,
+    "partial": 0,
+    "no": 0,
+    "ungraded": 17
+  },
+  "privacy_safe": {
+    "yes": 3,
+    "partial": 0,
+    "no": 0,
+    "ungraded": 0
+  },
+  "note": "Small synthetic demo benchmark. Manual judgments are not inferred by the script."
+}

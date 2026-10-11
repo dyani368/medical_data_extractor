@@ -49,7 +49,8 @@ def recall_hit(question, results):
 def summarize(rows):
     metrics = {}
     for endpoint in ("search", "agent"):
-        matching = [r for r in rows if r["endpoint"] == endpoint and r["http_status"] == "200"]
+        aliases = {"agent", "chat/agent"} if endpoint == "agent" else {endpoint}
+        matching = [r for r in rows if r["endpoint"].strip("/") in aliases and r["http_status"] == "200"]
         durations = [float(r["latency_ms"]) for r in matching]
         metrics[endpoint] = {
             "successful_requests": len(matching),
@@ -62,11 +63,14 @@ def summarize(rows):
         "answerable_questions": len(search_rows),
         "rate": round(sum(r["retrieval_hit"] == "true" for r in search_rows) / len(search_rows), 4) if search_rows else None,
     }
+    agent_rows = [r for r in rows if r["endpoint"].strip("/") in {"agent", "chat/agent"}]
     for field in MANUAL_FIELDS:
-        graded = [r[field].lower() for r in rows if r[field].lower() in {"yes", "no"}]
-        partial = sum(r[field].lower() == "partial" for r in rows)
+        eligible = [r for r in agent_rows if field != "privacy_safe" or r.get("privacy_test", "").lower() == "true"]
+        labels = [r.get(field, "").strip().lower() for r in eligible]
+        graded = [label for label in labels if label in {"yes", "no"}]
+        partial = labels.count("partial")
         metrics[field] = {"yes": graded.count("yes"), "partial": partial,
-                          "no": graded.count("no"), "ungraded": len(rows)-len(graded)-partial}
+                          "no": graded.count("no"), "ungraded": len(eligible)-len(graded)-partial}
     metrics["note"] = "Small synthetic demo benchmark. Manual judgments are not inferred by the script."
     return metrics
 

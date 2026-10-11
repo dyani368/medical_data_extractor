@@ -1,6 +1,7 @@
 import json
 import time
 import re
+import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models.document_model import Document
@@ -23,15 +24,21 @@ TOOL_REGISTRY = {
 NO_EVIDENCE = "I do not have sufficient information in the available records to answer this query."
 SEARCH_FAILED = "Record search failed. Please retry; this does not mean the records contain no answer."
 ACCESS_REFUSAL = "I can only access records associated with your authenticated account. I cannot search or disclose another user's records or conversations."
-POLICY_UNAVAILABLE = "I could not check this request's access policy. Please retry. No records were searched."
+logger = logging.getLogger(__name__)
 
 
 async def check_access_policy(messages, llm_provider):
     try:
         if await llm_provider.requests_other_account(messages):
             return ACCESS_REFUSAL
-    except Exception:
-        return POLICY_UNAVAILABLE
+    except Exception as error:
+        # This classifier is not an authorization boundary. Every document and
+        # conversation query is independently scoped to the authenticated user.
+        # Let the normal agent handle the request with that enforced scope if
+        # the optional intent check is temporarily unavailable.
+        logger.warning("Cross-account intent check failed; continuing with authenticated-user scope (%s)",
+                       type(error).__name__)
+        return None
     return None
 
 

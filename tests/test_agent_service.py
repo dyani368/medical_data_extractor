@@ -209,11 +209,11 @@ async def test_cross_account_refusal_never_retrieves_records(monkeypatch, conver
 
 
 @pytest.mark.asyncio
-async def test_policy_error_fails_closed():
+async def test_policy_error_continues_with_tenant_scope():
     result = await agent_service.check_access_policy([], SimpleNamespace(
         requests_other_account=AsyncMock(side_effect=RuntimeError("provider unavailable"))
     ))
-    assert result == agent_service.POLICY_UNAVAILABLE
+    assert result is None
 
 
 def test_sources_include_only_cited_retrieved_passages():
