@@ -2,12 +2,14 @@ import json
 from sqlalchemy.orm import Session
 from app.models.conversation_model import Conversation, Message
 from app.schemas.document_schema import SearchRequest
+from fastapi import HTTPException
 
 def get_or_create_conversation(db: Session, user_id: int, conversation_id: int = None) -> Conversation:
-    if conversation_id:
+    if conversation_id is not None:
         conv = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.user_id == user_id).first()
         if conv:
             return conv
+        raise HTTPException(status_code=404, detail="Conversation not found")
     new_conv = Conversation(user_id=user_id)
     db.add(new_conv)
     db.commit()
@@ -41,8 +43,11 @@ def save_message(db: Session, conversation_id: int, role: str, content: str, too
     return new_msg
 
 def get_conversation_history(db: Session, conversation_id: int, limit: int = 10) -> list:
-    messages_db = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(limit).all()
+    messages_db = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.desc(), Message.id.desc()).limit(limit).all()
     messages_db.reverse()
+    # Do not send a truncated tool exchange to the provider. Start at a user turn.
+    while messages_db and messages_db[0].role != "user":
+        messages_db.pop(0)
     
     formatted_messages = []
     for msg in messages_db:

@@ -108,3 +108,74 @@ async def test_chat_redacts_prompt_before_storage_and_provider(monkeypatch, conv
 
     assert saved[0] == ("user", "What happened to <PERSON>?")
     assert "Jane Doe" not in str(provider.run_agent.await_args.args[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("new_search", [False, True])
+async def test_followup_reuses_owned_evidence_when_new_search_is_empty(
+    monkeypatch, conversation_stubs, stream, new_search
+):
+    history = [
+        {"role": "user", "content": "What was recorded in the cardiovascular follow-up?"},
+        {"role": "tool", "content": "[doc:33] BP 160/95. Denied chest pain and shortness of breath."},
+        {"role": "assistant", "content": "BP 160/95 [doc:33]"},
+        {"role": "user", "content": "Did the patient report chest pain?"},
+    ]
+    monkeypatch.setattr(agent_service, "get_conversation_history", lambda *args, **kwargs: list(history))
+    db = MagicMock()
+    db.execute.return_value.scalars.return_value.all.return_value = [
+        SimpleNamespace(id=33, filename="cardio.pdf", raw_content="Denied chest pain and shortness of breath.")
+    ]
+    search = MagicMock(return_value=[])
+    monkeypatch.setitem(agent_service.TOOL_REGISTRY, "search_medical_records", search)
+    answer = "The patient denied chest pain and shortness of breath. [doc:33]"
+    provider = SimpleNamespace(run_agent=AsyncMock(side_effect=[
+        SimpleNamespace(tool_calls=[tool_call('{"query":"cardiovascular follow-up chest pain"}')] if new_search else None,
+                        content=None if new_search else answer),
+        SimpleNamespace(tool_calls=None, content=answer),
+    ]))
+    async def stream_answer(messages):
+        yield f"data: {answer}\n\n"
+    provider.run_agent_stream = stream_answer
+    if stream:
+        output = "".join([chunk async for chunk in agent_service.run_clinical_agent_stream(
+            "Did the patient report chest pain?", 42, db, provider, conversation_id=123
+        )])
+        assert answer in output
+        assert '"document_id": 33' in output
+    else:
+        result = await agent_service.run_clinical_agent(
+            "Did the patient report chest pain?", 42, db, provider, conversation_id=123
+        )
+        assert result["response"] == answer
+        assert result["sources"] == [{"document_id": 33, "filename": "cardio.pdf"}]
+    assert provider.run_agent.await_args_list[0].kwargs == {"require_tool": None}
+    stmt = db.execute.call_args.args[0]
+    assert stmt.compile().params["user_id_1"] == 42
+
+
+def test_assistant_claims_are_not_reused_as_evidence():
+    db = MagicMock()
+    assert agent_service.load_previous_evidence(
+        [{"role": "assistant", "content": "Made up [doc:99]"}], 42, db
+    ) == ("", [])
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_search_errors_are_not_reported_as_missing_evidence(monkeypatch, conversation_stubs, stream):
+    monkeypatch.setitem(agent_service.TOOL_REGISTRY, "search_medical_records", MagicMock(side_effect=RuntimeError("broken")))
+    provider = SimpleNamespace(run_agent=AsyncMock(return_value=SimpleNamespace(
+        tool_calls=[tool_call('{"query":"cardio"}')], content=None
+    )))
+    db = MagicMock()
+    if stream:
+        output = "".join([chunk async for chunk in agent_service.run_clinical_agent_stream("question", 42, db, provider)])
+        assert agent_service.SEARCH_FAILED in output
+        assert agent_service.NO_EVIDENCE not in output
+    else:
+        result = await agent_service.run_clinical_agent("question", 42, db, provider)
+        assert result["response"] == agent_service.SEARCH_FAILED
+    db.rollback.assert_called_once()

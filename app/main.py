@@ -33,8 +33,8 @@ import uuid
 import os
 import asyncio
 import json
-
 from dotenv import load_dotenv
+
 
 def initialize_database():
     with engine.begin() as conn:
