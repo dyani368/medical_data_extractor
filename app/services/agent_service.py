@@ -91,7 +91,14 @@ def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, 
     args = agent_tools.parse_arguments(raw_arguments)
     if name == "search_medical_records":
         kwargs = search_tool_arguments(raw_arguments, query, user_id, db)
-        return format_search_results(doc_search.generate_relevant_docs(**kwargs))
+        search_tool = TOOL_REGISTRY.get(name)
+        # Keep the production retrieval implementation as the default, while
+        # dispatching through the registry so tests and configured tool
+        # implementations exercise the same path. Tenant scope and limit are
+        # always injected above, never accepted from model arguments.
+        docs = (search_tool(**kwargs) if callable(search_tool)
+                else doc_search.generate_relevant_docs(**kwargs))
+        return format_search_results(docs)
     document_id = args.get("document_id")
     if isinstance(document_id, bool) or not isinstance(document_id, int):
         return "A valid document_id from your search results is required.", []

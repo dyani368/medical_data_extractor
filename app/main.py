@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException,status, UploadFile, File, Request, BackgroundTasks, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import Annotated
 from pydantic import ValidationError
 
