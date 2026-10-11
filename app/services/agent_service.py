@@ -19,6 +19,23 @@ TOOL_REGISTRY = {
 
 NO_EVIDENCE = "I do not have sufficient information in the available records to answer this query."
 SEARCH_FAILED = "Record search failed. Please retry; this does not mean the records contain no answer."
+ACCESS_REFUSAL = "I can only access records associated with your authenticated account. I cannot search or disclose another user's records or conversations."
+POLICY_UNAVAILABLE = "I could not check this request's access policy. Please retry. No records were searched."
+
+
+async def check_access_policy(messages, llm_provider):
+    try:
+        if await llm_provider.requests_other_account(messages):
+            return ACCESS_REFUSAL
+    except Exception:
+        return POLICY_UNAVAILABLE
+    return None
+
+
+def cited_sources(answer, candidates):
+    """Only references present in this answer and in server-owned evidence."""
+    ids = {int(match) for match in re.findall(r"(?:\[doc:|【(?:doc:)?)(\d+)(?:\]|】)", answer or "")}
+    return list({source["document_id"]: source for source in candidates if source["document_id"] in ids}.values())
 
 
 def load_previous_evidence(messages, user_id, db):
@@ -75,6 +92,10 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
 
     # Get history with sliding window (e.g., last 10 messages) to prevent context bloat
     messages = get_conversation_history(db, conv.id, limit=10)
+    refusal = await check_access_policy(messages, llm_provider)
+    if refusal:
+        save_message(db, conv.id, "assistant", refusal)
+        return {"response": refusal, "conversation_id": conv.id, "sources": []}
     previous_passages, previous_sources = load_previous_evidence(messages, user_id, db)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
@@ -158,11 +179,11 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
         # Save final assistant response
         save_message(db, conv.id, "assistant", final_message.content)
 
-        return {"response": final_message.content or "No response generated.", "conversation_id": conv.id, "sources": sources}
+        return {"response": final_message.content or "No response generated.", "conversation_id": conv.id, "sources": cited_sources(final_message.content, sources)}
 
     if previous_sources:
         save_message(db, conv.id, "assistant", response_message.content)
-        return {"response": response_message.content or NO_EVIDENCE, "conversation_id": conv.id, "sources": previous_sources}
+        return {"response": response_message.content or NO_EVIDENCE, "conversation_id": conv.id, "sources": cited_sources(response_message.content, previous_sources)}
 
     # Clinical answers require retrieved evidence even if the model skips tools.
     save_message(db, conv.id, "assistant", NO_EVIDENCE)
@@ -174,6 +195,12 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
     conv = get_or_create_conversation(db, user_id, conversation_id)
     save_message(db, conv.id, "user", query)
     messages = get_conversation_history(db, conv.id, limit=10)
+    refusal = await check_access_policy(messages, llm_provider)
+    if refusal:
+        save_message(db, conv.id, "assistant", refusal)
+        yield f"event: sources\ndata: []\n\n"
+        yield f"data: {refusal}\n\n"
+        return
     previous_passages, previous_sources = load_previous_evidence(messages, user_id, db)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
@@ -242,22 +269,23 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
             save_message(db, conv.id, "assistant", refusal)
             return
 
-        yield f"event: sources\ndata: {json.dumps(sources)}\n\n"
         final_content = ""
         async for chunk in llm_provider.run_agent_stream(messages):
             yield chunk
             # parse the data: string
             if chunk.startswith("data: "):
-                content_chunk = chunk[6:].strip()
-                if content_chunk:
-                    final_content += content_chunk + " "
+                content_chunk = chunk[6:]
+                if content_chunk.endswith("\n\n"):
+                    content_chunk = content_chunk[:-2]
+                final_content += content_chunk
 
-        save_message(db, conv.id, "assistant", final_content.strip())
+        save_message(db, conv.id, "assistant", final_content)
+        yield f"event: sources\ndata: {json.dumps(cited_sources(final_content, sources))}\n\n"
         return
 
     if previous_sources:
-        yield f"event: sources\ndata: {json.dumps(previous_sources)}\n\n"
         content = response_message.content or NO_EVIDENCE
+        yield f"event: sources\ndata: {json.dumps(cited_sources(content, previous_sources))}\n\n"
         yield f"data: {content}\n\n"
         save_message(db, conv.id, "assistant", content)
         return
