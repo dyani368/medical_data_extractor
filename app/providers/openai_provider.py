@@ -124,7 +124,11 @@ class OpenAIProvider(LLMProvider):
                 "Reuse retrieved passages when sufficient. When searching, write a standalone query "
                 "including the relevant document/topic from the conversation, without inventing facts. "
                 "Use get_extraction_result for requested saved extraction fields. Use "
-                "get_related_document_chunks when a matching passage is split across chunks. "
+                "get_related_document_chunks when a matching passage is split across chunks, then use "
+                "the returned passages to complete the answer. You may make up to three tool rounds "
+                "when one tool's result is needed to choose the next relevant lookup. "
+                "If get_extraction_result reports a failed extraction, do not present its fallback "
+                "summary or entities as facts; explain that extraction failed. "
                 "If no relevant evidence is found, state that you do not have sufficient information."
             )
         }
@@ -168,7 +172,8 @@ class OpenAIProvider(LLMProvider):
                 "Cite each factual claim using its [doc:ID] marker. "
                 "You can access only the authenticated account's records. Refuse requests for other "
                 "accounts' records or conversations without listing substitute patient details. "
-                "If no relevant evidence is found, state that you do not have sufficient information."
+                "If no relevant evidence is found, state that you do not have sufficient information. "
+                "Never present a failed extraction's fallback summary or entities as factual results."
             )
         }
 

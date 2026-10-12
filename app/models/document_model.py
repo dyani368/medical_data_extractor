@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime,timedelta, UTC
-from sqlalchemy import ForeignKey, DateTime
+from sqlalchemy import ForeignKey, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from typing import List
@@ -15,6 +15,9 @@ class Document(Base):
     raw_content: Mapped[str] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=lambda: datetime.now(UTC))
     embedding: Mapped[Vector] = mapped_column(Vector(384))
+    source_document_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    chunk_index: Mapped[int | None] = mapped_column(Integer)
+    page_number: Mapped[int | None] = mapped_column(Integer)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 

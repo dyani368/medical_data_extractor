@@ -49,8 +49,12 @@ The pipeline is designed around defense-in-depth security principles:
 - **Recursive Chunking & Embeddings:** Documents are partitioned via `RecursiveCharacterTextSplitter` (500-char chunks, 50 overlap) and embedded into 384-dimensional dense vectors using HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`).
 - **Hybrid Search:** Tenant-scoped `pgvector` and PostgreSQL full-text rankings fused for candidate passage retrieval.
 - **Autonomous Clinical Agent & Tool Calling:** Dynamically calls vector search tools with server-enforced user boundaries and returns responses with document citations (`[doc:ID]`).
+- **Bounded multi-step tool use:** The agent can search, inspect neighboring chunks, and retrieve extraction results across up to three tool rounds; server-side user scoping applies to every lookup.
 - **Server-Sent Events (SSE) Streaming:** `/chat/stream` streams answer tokens in real time, then emits cited source metadata.
 - **Focused agent tools:** Search passages, retrieve a saved extraction, and load neighboring chunks from a retrieved document; every lookup uses the authenticated user scope.
+- **Document and conversation API:** List, inspect, and delete the authenticated user's uploaded documents; retrieve per-chunk extraction outcomes and list or reopen conversation history.
+- **Page-aware provenance:** PDF chunks retain their source upload, chunk order, and page number so citations and related-chunk retrieval can point back to the source location.
+- **Extraction outcome reporting:** Jobs distinguish successful ingestion with extraction errors, and extraction records expose per-chunk success/failure state and error type rather than hiding fallback results.
 - **Retention:** Redis upload-job status expires after 30 days and idempotency keys after 24 hours. Uploaded records and conversations persist until manual administrative deletion; this demo has no user-facing delete endpoint yet.
 - **Schema migrations:** Alembic applies versioned schema migrations at API startup. Existing deployments are baselined against their existing tables; future schema changes belong in a new migration revision.
 - To apply versioned schema changes manually, install `requirements.txt` and run `alembic upgrade head` from the project root. The first revision records the current schema without dropping existing tables or data.
@@ -83,6 +87,12 @@ The pipeline is designed around defense-in-depth security principles:
 | `GET` | `/me` | Get profile of currently authenticated user | Yes |
 | `POST` | `/upload` | Queue document for async ingestion | Yes |
 | `GET` | `/jobs/{job_id}` | Poll ingestion status | Yes |
+| `GET` | `/documents` | List the authenticated user's uploaded documents | Yes |
+| `GET` | `/documents/{document_id}` | Retrieve a document and its ordered source chunks | Yes |
+| `GET` | `/documents/{document_id}/extraction` | Retrieve per-chunk extraction outcomes | Yes |
+| `DELETE` | `/documents/{document_id}` | Delete an uploaded document and its extraction results | Yes |
+| `GET` | `/conversations` | List the authenticated user's conversations | Yes |
+| `GET` | `/conversations/{conversation_id}` | Retrieve a conversation's user and assistant messages | Yes |
 | `POST` | `/search` | Semantic vector search across user records | Yes |
 | `POST` | `/chat/agent` | Autonomous clinical QA agent with tool execution | Yes |
 | `POST` | `/chat/stream` | Stream QA answers and sources via Server-Sent Events | Yes |

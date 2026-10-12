@@ -1,13 +1,13 @@
 {
   "search": {
     "successful_requests": 40,
-    "median_latency_ms": 1709.2,
-    "p95_latency_ms": 3909.7
+    "median_latency_ms": 1735.5,
+    "p95_latency_ms": 1920.3
   },
   "agent": {
-    "successful_requests": 38,
-    "median_latency_ms": 9235.9,
-    "p95_latency_ms": 21491.6
+    "successful_requests": 40,
+    "median_latency_ms": 9786.0,
+    "p95_latency_ms": 16789.8
   },
   "retrieval_hit_at_5": {
     "hits": 25,
@@ -15,22 +15,22 @@
     "rate": 0.8621
   },
   "answer_correct": {
-    "yes": 30,
-    "partial": 3,
-    "no": 7,
+    "yes": 36,
+    "partial": 4,
+    "no": 0,
     "ungraded": 0
   },
   "refusal_correct": {
-    "yes": 32,
+    "yes": 39,
     "partial": 1,
-    "no": 7,
+    "no": 0,
     "ungraded": 0
   },
   "citation_supported": {
-    "yes": 23,
-    "partial": 0,
+    "yes": 29,
+    "partial": 1,
     "no": 0,
-    "ungraded": 17
+    "ungraded": 10
   },
   "privacy_safe": {
     "yes": 3,

@@ -20,6 +20,8 @@ TOOL_REGISTRY = {
     "get_extraction_result": True,
     "get_related_document_chunks": True,
 }
+MAX_AGENT_TOOL_ROUNDS = 3
+MAX_AGENT_TOOL_CALLS = 6
 
 NO_EVIDENCE = "I do not have sufficient information in the available records to answer this query."
 SEARCH_FAILED = "Record search failed. Please retry; this does not mean the records contain no answer."
@@ -75,6 +77,9 @@ def format_search_results(docs) -> tuple[str, list[dict]]:
     passages = []
     for doc in docs:
         source = {"document_id": doc.id, "filename": redact_text(doc.filename)}
+        page_number = getattr(doc, "page_number", None)
+        if page_number is not None:
+            source["page_number"] = page_number
         sources.append(source)
         passages.append(f"[doc:{doc.id}] {redact_text(doc.raw_content)}")
     return "\n\n".join(passages) if passages else "No relevant records found.", sources
@@ -116,6 +121,76 @@ def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, 
         return format_search_results(agent_tools.get_related_document_chunks(document_id, user_id, db))
     return "Unsupported tool.", []
 
+
+async def execute_agent_tool_rounds(messages, response_message, query, user_id, db, llm_provider, conversation_id, initial_sources):
+    """Run a bounded sequence of model-selected tools with server-owned scope."""
+    sources = list(initial_sources)
+    tool_failed = False
+    rounds = 0
+    executed_calls = 0
+    while response_message.tool_calls and rounds < MAX_AGENT_TOOL_ROUNDS:
+        tool_calls = response_message.tool_calls
+        save_message(db, conversation_id, "assistant", response_message.content, tool_calls=tool_calls)
+        messages.append({
+            "role": "assistant",
+            "content": response_message.content,
+            "tool_calls": [{
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.function.name, "arguments": call.function.arguments},
+            } for call in tool_calls],
+        })
+
+        for call in tool_calls:
+            if executed_calls >= MAX_AGENT_TOOL_CALLS:
+                tool_result = "Tool-call limit reached; answer using the evidence already retrieved."
+                save_message(db, conversation_id, "tool", tool_result, tool_call_id=call.id)
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": tool_result})
+                continue
+            executed_calls += 1
+            if call.function.name in TOOL_REGISTRY:
+                arguments = agent_tools.parse_arguments(call.function.arguments)
+                started_at = time.time()
+                audit_log = AgentAuditLog(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    action="tool_execution",
+                    tool_name=call.function.name,
+                    inputs=arguments,
+                )
+                db.add(audit_log)
+                try:
+                    tool_result, found_sources = execute_agent_tool(
+                        call.function.name, call.function.arguments, query, user_id, db
+                    )
+                    sources.extend(found_sources)
+                    sources = list({source["document_id"]: source for source in sources}.values())
+                    audit_log.outputs = {"status": "success", "length": len(tool_result)}
+                except Exception as exc:
+                    db.rollback()
+                    db.add(audit_log)
+                    tool_failed = True
+                    tool_result = "Record lookup failed. Please retry."
+                    audit_log.outputs = {"status": "error"}
+                    audit_log.error = type(exc).__name__
+                finally:
+                    audit_log.latency_ms = (time.time() - started_at) * 1000
+                    db.commit()
+            else:
+                tool_result = f"Error: Tool '{call.function.name}' not registered."
+
+            save_message(db, conversation_id, "tool", tool_result, tool_call_id=call.id)
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": tool_result})
+
+        rounds += 1
+        if rounds < MAX_AGENT_TOOL_ROUNDS:
+            response_message = await llm_provider.run_agent(messages, require_tool=None)
+        elif response_message.tool_calls:
+            # One final answer turn is allowed after the tool budget is used;
+            # it cannot request another tool and therefore cannot loop forever.
+            response_message = await llm_provider.run_agent(messages, require_tool=False)
+    return response_message, sources, tool_failed
+
 async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None) -> dict:
     query = redact_text(query)
     conv = get_or_create_conversation(db, user_id, conversation_id)
@@ -137,80 +212,19 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
     response_message = await llm_provider.run_agent(messages, require_tool=None if previous_sources else True)
 
     if response_message.tool_calls:
-        sources = list(previous_sources)
-        search_failed = False
-        # Save assistant message with tool calls
-        save_message(db, conv.id, "assistant", response_message.content, tool_calls=response_message.tool_calls)
-
-        messages.append({
-            "role": "assistant",
-            "content": response_message.content,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                } for tc in response_message.tool_calls
-            ]
-        })
-
-        for tool_call in response_message.tool_calls:
-            if tool_call.function.name in TOOL_REGISTRY:
-                arguments = agent_tools.parse_arguments(tool_call.function.arguments)
-
-                start_time = time.time()
-                audit_log = AgentAuditLog(
-                    user_id=user_id,
-                    conversation_id=conv.id,
-                    action="tool_execution",
-                    tool_name=tool_call.function.name,
-                    inputs=arguments
-                )
-                db.add(audit_log)
-
-                try:
-                    tool_result, found_sources = execute_agent_tool(
-                        tool_call.function.name, tool_call.function.arguments, query, user_id, db
-                    )
-                    sources.extend(found_sources)
-                    sources = list({source["document_id"]: source for source in sources}.values())
-                    audit_log.outputs = {"status": "success", "length": len(tool_result)}
-                except Exception as e:
-                    db.rollback()
-                    db.add(audit_log)
-                    search_failed = True
-                    tool_result = "Search failed. Please retry."
-                    audit_log.outputs = {"status": "error"}
-                    audit_log.error = type(e).__name__
-                finally:
-                    audit_log.latency_ms = (time.time() - start_time) * 1000
-                    db.commit()
-            else:
-                tool_result = f"Error: Tool '{tool_call.function.name}' not registered."
-
-            # Save tool response
-            save_message(db, conv.id, "tool", tool_result, tool_call_id=tool_call.id)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": tool_result
-            })
-
+        response_message, sources, search_failed = await execute_agent_tool_rounds(
+            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources
+        )
         if not sources:
             refusal = SEARCH_FAILED if search_failed else NO_EVIDENCE
             save_message(db, conv.id, "assistant", refusal)
             return {"response": refusal, "conversation_id": conv.id, "sources": []}
 
-        final_message = await llm_provider.run_agent(messages, require_tool=False)
-
         # Save final assistant response
-        save_message(db, conv.id, "assistant", final_message.content)
+        answer = response_message.content or NO_EVIDENCE
+        save_message(db, conv.id, "assistant", answer)
 
-        return {"response": final_message.content or "No response generated.", "conversation_id": conv.id, "sources": cited_sources(final_message.content, sources)}
+        return {"response": answer, "conversation_id": conv.id, "sources": cited_sources(answer, sources)}
 
     if previous_sources:
         save_message(db, conv.id, "assistant", response_message.content)
@@ -238,77 +252,26 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
     response_message = await llm_provider.run_agent(messages, require_tool=None if previous_sources else True)
 
     if response_message.tool_calls:
-        sources = list(previous_sources)
-        search_failed = False
-        save_message(db, conv.id, "assistant", response_message.content, tool_calls=response_message.tool_calls)
-        messages.append({
-            "role": "assistant",
-            "content": response_message.content,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                } for tc in response_message.tool_calls
-            ]
-        })
-
-        for tool_call in response_message.tool_calls:
-            if tool_call.function.name in TOOL_REGISTRY:
-                arguments = agent_tools.parse_arguments(tool_call.function.arguments)
-
-                start_time = time.time()
-                audit_log = AgentAuditLog(
-                    user_id=user_id,
-                    conversation_id=conv.id,
-                    action="tool_execution",
-                    tool_name=tool_call.function.name,
-                    inputs=arguments
-                )
-                db.add(audit_log)
-
-                try:
-                    tool_result, found_sources = execute_agent_tool(
-                        tool_call.function.name, tool_call.function.arguments, query, user_id, db
-                    )
-                    sources.extend(found_sources)
-                    sources = list({source["document_id"]: source for source in sources}.values())
-                    audit_log.outputs = {"status": "success", "length": len(tool_result)}
-                except Exception as e:
-                    db.rollback()
-                    db.add(audit_log)
-                    search_failed = True
-                    tool_result = "Search failed. Please retry."
-                    audit_log.outputs = {"status": "error"}
-                    audit_log.error = type(e).__name__
-                finally:
-                    audit_log.latency_ms = (time.time() - start_time) * 1000
-                    db.commit()
-            else:
-                tool_result = f"Error: Tool '{tool_call.function.name}' not registered."
-
-            save_message(db, conv.id, "tool", tool_result, tool_call_id=tool_call.id)
-            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": tool_result})
-
+        response_message, sources, search_failed = await execute_agent_tool_rounds(
+            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources
+        )
         if not sources:
             refusal = SEARCH_FAILED if search_failed else NO_EVIDENCE
             yield f"data: {refusal}\n\n"
             save_message(db, conv.id, "assistant", refusal)
             return
 
+        # Preserve token delivery after the bounded tool loop has finished.
         final_content = ""
         async for chunk in llm_provider.run_agent_stream(messages):
             yield chunk
-            # parse the data: string
             if chunk.startswith("data: "):
                 content_chunk = chunk[6:]
                 if content_chunk.endswith("\n\n"):
                     content_chunk = content_chunk[:-2]
                 final_content += content_chunk
-
+        if not final_content:
+            final_content = response_message.content or NO_EVIDENCE
         save_message(db, conv.id, "assistant", final_content)
         yield f"event: sources\ndata: {json.dumps(cited_sources(final_content, sources))}\n\n"
         return

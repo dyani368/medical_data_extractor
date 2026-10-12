@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime,timedelta, UTC
-from sqlalchemy import ForeignKey, DateTime
+from sqlalchemy import ForeignKey, DateTime, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -14,6 +14,8 @@ class Result(Base):
     key_entities: Mapped[dict] = mapped_column(JSONB, nullable=False)
     confidence: Mapped[float] = mapped_column(nullable=False)
     category: Mapped[str] = mapped_column(nullable=False, index=True)
+    extraction_status: Mapped[str] = mapped_column(String(20), nullable=False, default="succeeded", server_default=text("'succeeded'"))
+    error_type: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=lambda: datetime.now(UTC))
 
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), index=True)

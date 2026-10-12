@@ -25,11 +25,16 @@ def get_extraction_result(document_id: int, user_id: int, db: Session):
         return "No extraction result was found for that document in your records.", []
     document, result = row
     content = (
-        f"[doc:{document.id}] Stored extraction: {result.summary}\n"
+        f"[doc:{document.id}] Extraction status: {result.extraction_status}\n"
+        f"Stored extraction: {result.summary}\n"
         f"Category: {result.category}\nExtracted entities: {json.dumps(result.key_entities, ensure_ascii=False)}\n"
         f"Confidence: {result.confidence:.2f}"
+        + (f"\nExtraction error: {result.error_type}" if result.error_type else "")
     )
-    return content, [{"document_id": document.id, "filename": document.filename}]
+    source = {"document_id": document.id, "filename": document.filename}
+    if document.page_number is not None:
+        source["page_number"] = document.page_number
+    return content, [source]
 
 
 def get_related_document_chunks(document_id: int, user_id: int, db: Session):
@@ -38,6 +43,15 @@ def get_related_document_chunks(document_id: int, user_id: int, db: Session):
     )).scalar_one_or_none()
     if document is None:
         return []
+    source_document_id = getattr(document, "source_document_id", None)
+    chunk_index = getattr(document, "chunk_index", None)
+    if source_document_id and chunk_index is not None:
+        return db.execute(select(Document).where(
+            Document.user_id == user_id,
+            Document.source_document_id == source_document_id,
+            Document.chunk_index.between(max(0, chunk_index - 2), chunk_index + 2),
+        ).order_by(Document.chunk_index).limit(5)).scalars().all()
+
     stem = document.filename.rsplit("_chunk_", 1)[0]
     return db.execute(select(Document).where(
         Document.user_id == user_id,
