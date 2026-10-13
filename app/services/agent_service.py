@@ -2,6 +2,7 @@ import json
 import time
 import re
 import logging
+from app.core.async_work import run_blocking
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models.document_model import Document
@@ -160,7 +161,7 @@ async def execute_agent_tool_rounds(messages, response_message, query, user_id, 
                 )
                 db.add(audit_log)
                 try:
-                    tool_result, found_sources = execute_agent_tool(
+                    tool_result, found_sources = await run_blocking(execute_agent_tool,
                         call.function.name, call.function.arguments, query, user_id, db
                     )
                     sources.extend(found_sources)
@@ -183,6 +184,8 @@ async def execute_agent_tool_rounds(messages, response_message, query, user_id, 
             messages.append({"role": "tool", "tool_call_id": call.id, "content": tool_result})
 
         rounds += 1
+        if tool_failed and not sources:
+            return response_message, sources, tool_failed
         if rounds < MAX_AGENT_TOOL_ROUNDS:
             response_message = await llm_provider.run_agent(messages, require_tool=None)
         elif response_message.tool_calls:
@@ -192,7 +195,7 @@ async def execute_agent_tool_rounds(messages, response_message, query, user_id, 
     return response_message, sources, tool_failed
 
 async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None) -> dict:
-    query = redact_text(query)
+    query = await run_blocking(redact_text, query)
     conv = get_or_create_conversation(db, user_id, conversation_id)
 
     # Save user message
@@ -204,7 +207,7 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
     if refusal:
         save_message(db, conv.id, "assistant", refusal)
         return {"response": refusal, "conversation_id": conv.id, "sources": []}
-    previous_passages, previous_sources = load_previous_evidence(messages, user_id, db)
+    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
     # Retrieval is required for the first model turn. Otherwise a model may answer
@@ -236,8 +239,9 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
     return {"response": NO_EVIDENCE, "conversation_id": conv.id, "sources": []}
 
 async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None):
-    query = redact_text(query)
+    query = await run_blocking(redact_text, query)
     conv = get_or_create_conversation(db, user_id, conversation_id)
+    yield f'event: conversation\ndata: {json.dumps({"conversation_id": conv.id})}\n\n'
     save_message(db, conv.id, "user", query)
     messages = get_conversation_history(db, conv.id, limit=10)
     refusal = await check_access_policy(messages, llm_provider)
@@ -246,7 +250,7 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
         yield f"event: sources\ndata: []\n\n"
         yield f"data: {refusal}\n\n"
         return
-    previous_passages, previous_sources = load_previous_evidence(messages, user_id, db)
+    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
     response_message = await llm_provider.run_agent(messages, require_tool=None if previous_sources else True)

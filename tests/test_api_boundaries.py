@@ -36,10 +36,19 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "initialize_database", lambda: None)
     monkeypatch.setattr(main, "get_redis", lambda: redis)
 
-    async def fake_worker(*args, **kwargs):
-        pass
+    def enqueue(pages, filename, user_id, key, content):
+        import uuid
+        existing = redis.get(f"idempotency:{user_id}:{key}") if key else None
+        if existing:
+            return existing
+        job_id = str(uuid.uuid4())
+        redis.hset(f"job:{job_id}", mapping={"status": "queued", "user_id": user_id})
+        if key:
+            redis.setex(f"idempotency:{user_id}:{key}", 86400, job_id)
+        return job_id
 
-    monkeypatch.setattr(main, "process_document_job", fake_worker)
+    monkeypatch.setattr(main.ingestion_queue, "enqueue", enqueue)
+    monkeypatch.setattr(main.ingestion_queue, "get_status", lambda *args: None)
 
     def fake_user(x_test_user: int = Header(...)):
         return SimpleNamespace(id=x_test_user)

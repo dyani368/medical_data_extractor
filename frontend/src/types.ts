@@ -1,0 +1,11 @@
+export type User = { id: number; username: string }
+export type Source = { document_id: number; filename: string; page_number?: number | null }
+export type Chunk = { id: number; chunk_index: number | null; page_number: number | null; content: string }
+export type DocumentSummary = { document_id: string; filename: string; created_at: string; chunk_count: number; successful_extractions: number; failed_extractions: number; extraction_status: string }
+export type DocumentDetail = { document_id: string; filename: string; created_at: string; chunks: Chunk[] }
+export type ExtractionItem = { document_id: number; chunk_index: number | null; page_number: number | null; status: string; error_type: string | null; result: { summary: string; category: string; key_entities: Record<string, unknown>; confidence: number } | null }
+export type Extraction = { document_id: string; filename: string; items: ExtractionItem[] }
+export type Conversation = { conversation_id: number; created_at: string; updated_at: string; title?: string }
+export type Message = { id: string; role: 'user' | 'assistant'; content: string; sources?: Source[]; pending?: boolean; interrupted?: boolean }
+export type Job = { job_id: string; filename: string; status: string; progress: string; step?: string; attempts?: number; extraction_status?: string; failed_chunks?: number; error?: string; connectionError?: boolean }
+export type Passage = Chunk & { filename: string; source_document_id: string | null }

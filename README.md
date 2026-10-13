@@ -1,4 +1,17 @@
-# Clinical AI Extraction & Orchestration Pipeline (POC)
+# Clinical Document Intelligence Platform
+
+**Clarity** is the React workspace for this platform: document uploads, extraction review, source passages, and streamed conversations.
+
+Live workspace: [Clarity](http://32.236.61.231/). Sign in with an existing account or explore the clearly labeled demo without signing in. The IP deployment uses HTTP; use demo records only until HTTPS is configured.
+
+Run `docker compose up -d --build` and open `http://localhost` or `http://localhost:8000`.
+The frontend and API share one origin through Nginx. Existing API routes and `/docs` remain available; the frontend uses the `/api/` prefix.
+
+For frontend development, install Node.js 22 or later and pnpm 11.25.0, then run `pnpm install --frozen-lockfile` and `pnpm dev` from `frontend/`. Vite proxies `/api/` to the local backend on port 8000.
+The demo workspace contains explicitly labeled saved examples, and the downloadable PDFs contain invented records. Real uploads and conversations require an account.
+Authentication tokens are held in browser session storage and cleared on sign-out; expired sessions return to the sign-in screen.
+
+The Docker API requests embeddings from an authenticated, internal-only endpoint in the worker process. Ingestion and search share one model instance and a persistent model cache, reducing memory use on the small EC2 host. The worker port is not published. Locally, without `EMBEDDING_SERVICE_URL`, embedding inference runs in-process.
 
 A production-style proof of concept demonstrating asynchronous document ingestion, structured clinical entity extraction, semantic vector search, and evidence-grounded agentic question answering over synthetic records.
 
@@ -35,7 +48,7 @@ A production-style proof of concept demonstrating asynchronous document ingestio
 ```
 
 The pipeline is designed around defense-in-depth security principles:
-1. **Asynchronous Ingestion**: Documents are ingested, redacted, chunked, embedded, and stored in the background with Redis job state tracking.
+1. **Durable Asynchronous Ingestion**: The API validates and redacts uploads, then commits a PostgreSQL job. A separate Python worker claims jobs with `FOR UPDATE SKIP LOCKED`, renews a 90-second lease, and resumes completed chunk checkpoints after a crash. API restarts do not lose queued jobs.
 2. **Deterministic Multi-Tenancy**: Data access, tool execution, and query lookups are strictly bound to the authenticated user on the server side.
 3. **Evidence-Gated Answering**: The clinical QA agent requires explicit source grounding and withholds answers if relevant sources are absent.
 
@@ -55,7 +68,8 @@ The pipeline is designed around defense-in-depth security principles:
 - **Document and conversation API:** List, inspect, and delete the authenticated user's uploaded documents; retrieve per-chunk extraction outcomes and list or reopen conversation history.
 - **Page-aware provenance:** PDF chunks retain their source upload, chunk order, and page number so citations and related-chunk retrieval can point back to the source location.
 - **Extraction outcome reporting:** Jobs distinguish successful ingestion with extraction errors, and extraction records expose per-chunk success/failure state and error type rather than hiding fallback results.
-- **Retention:** Redis upload-job status expires after 30 days and idempotency keys after 24 hours. Uploaded records and conversations persist until manual administrative deletion; this demo has no user-facing delete endpoint yet.
+- **Queue recovery:** One ingestion job per worker process; three attempts maximum with bounded backoff. Leases prevent concurrent ownership and fence stale workers before chunk commits. Extraction/provider failures remain explicitly visible as `completed_with_errors`.
+- **Retention:** Durable terminal job records expire after 30 days; idempotency keys after 24 hours. Redacted queued text is cleared when jobs finish. The worker periodically removes expired terminal jobs, never active jobs. Uploaded documents can be deleted through the authenticated library/API; conversation history persists. Redis-only historical status remains readable until its TTL expires.
 - **Schema migrations:** Alembic applies versioned schema migrations at API startup. Existing deployments are baselined against their existing tables; future schema changes belong in a new migration revision.
 - To apply versioned schema changes manually, install `requirements.txt` and run `alembic upgrade head` from the project root. The first revision records the current schema without dropping existing tables or data.
 - **Tenant Isolation:** Enforced JWT authentication with Bcrypt password hashing. Database queries and tool invocations strictly bind `user_id` on the backend.
@@ -70,7 +84,8 @@ The pipeline is designed around defense-in-depth security principles:
 | **API & Core** | FastAPI, Pydantic v2, SQLAlchemy 2.0, Uvicorn |
 | **AI & NLP** | Groq / OpenAI (`AsyncOpenAI`), HuggingFace (`sentence-transformers`), LangChain |
 | **Storage & Vectors** | PostgreSQL 16 with `pgvector` extension |
-| **Caching & Job State** | Redis |
+| **Queue & Job State** | PostgreSQL leases/checkpoints; Redis for legacy state and worker health |
+| **Frontend** | React, TypeScript, Vite, Nginx |
 | **Security & Privacy** | PyJWT, Passlib (Bcrypt), Microsoft Presidio |
 | **Resilience & Fault Tolerance** | Tenacity |
 | **Infrastructure & CI/CD** | Docker, Docker Compose, GitHub Actions |
@@ -90,6 +105,7 @@ The pipeline is designed around defense-in-depth security principles:
 | `GET` | `/documents` | List the authenticated user's uploaded documents | Yes |
 | `GET` | `/documents/{document_id}` | Retrieve a document and its ordered source chunks | Yes |
 | `GET` | `/documents/{document_id}/extraction` | Retrieve per-chunk extraction outcomes | Yes |
+| `GET` | `/chunks/{chunk_id}` | Open an owned passage cited by an answer | Yes |
 | `DELETE` | `/documents/{document_id}` | Delete an uploaded document and its extraction results | Yes |
 | `GET` | `/conversations` | List the authenticated user's conversations | Yes |
 | `GET` | `/conversations/{conversation_id}` | Retrieve a conversation's user and assistant messages | Yes |
@@ -110,7 +126,7 @@ This repository is an engineering demonstration evaluated on synthetic datasets.
 | Potential Risk | Implemented Control | Test Verification |
 |---|---|---|
 | **Cross-Tenant Vector Query Injection** | LLM cannot supply tenant IDs; backend forcibly binds `user_id`, DB session, and query limits. | `test_agent_service.py`, `test_doc_search.py` |
-| **Cross-User Job Infiltration** | Owner ID stored with each Redis job record; verified upon lookup. | `test_api_boundaries.py` |
+| **Cross-User Job Infiltration** | Owner-scoped durable job lookup, with owner checks on historical Redis jobs. | `test_api_boundaries.py`, `test_ingestion_queue.py` |
 | **Sensitive Entity Leakage to Providers** | Input sanitized via Presidio before LLM call; chunks sanitized before response assembly. | `test_privacy.py`, `test_extraction_privacy.py` |
 | **Hallucinated Clinical Statements** | Agent refuses to generate unsupported answers when retrieval returns no sources. | `test_agent_service.py` |
 

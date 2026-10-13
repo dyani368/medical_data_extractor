@@ -15,14 +15,21 @@ services:
 
   api:
     build: .
-    ports:
-      - "8000:8000"
+    image: amgen-poc-api:latest
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    expose:
+      - "8000"
     env_file:
       - .env
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - TOKENIZERS_PARALLELISM=false
+      - EMBEDDING_SERVICE_URL=http://worker:8001
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +40,40 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  worker:
+    image: amgen-poc-api:latest
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - TOKENIZERS_PARALLELISM=false
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.redis_client import get_redis; assert get_redis().get('worker:heartbeat')"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+      - "8000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
   redis:
     image: redis:alpine
@@ -54,5 +95,6 @@ services:
         condition: service_healthy
 
 volumes:
+  hf_cache:
   pgdata:
   n8n_data:
