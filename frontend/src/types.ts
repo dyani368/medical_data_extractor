@@ -1,9 +1,9 @@
 export type User = { id: number; username: string }
 export type Source = { document_id: number; filename: string; page_number?: number | null; element_type?: string; section_title?: string | null }
 export type Visual = { url: string; mime_type: string; object_url?: string }
-export type Chunk = { id: number; chunk_index: number | null; page_number: number | null; content: string; element_type?: string; section_title?: string | null; visuals?: Visual[] }
+export type Chunk = { id: number; chunk_index: number | null; page_number: number | null; content: string; element_type?: string; section_title?: string | null; bbox?: number[] | null; visuals?: Visual[] }
 export type DocumentSummary = { document_id: string; filename: string; created_at: string; chunk_count: number; successful_extractions: number; failed_extractions: number; extraction_status: string }
-export type DocumentDetail = { document_id: string; filename: string; created_at: string; chunks: Chunk[] }
+export type DocumentDetail = { document_id: string; filename: string; created_at: string; page_count?: number; pages?: { page_number: number; width: number; height: number }[]; chunks: Chunk[] }
 export type ExtractionItem = { document_id: number; chunk_index: number | null; page_number: number | null; status: string; error_type: string | null; result: { summary: string; category: string; key_entities: Record<string, unknown>; confidence: number } | null }
 export type Extraction = { document_id: string; filename: string; items: ExtractionItem[] }
 export type Conversation = { conversation_id: number; created_at: string; updated_at: string; title?: string }

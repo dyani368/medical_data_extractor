@@ -21,6 +21,7 @@ class Document(Base):
     element_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
     section_title: Mapped[str | None] = mapped_column(String(300))
     visual_assets: Mapped[list | None] = mapped_column(JSON)
+    bbox: Mapped[list | None] = mapped_column(JSON)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 

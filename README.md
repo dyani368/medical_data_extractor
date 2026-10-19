@@ -1,6 +1,6 @@
 # Clinical Document Intelligence Platform
 
-**Clarity** is the React workspace for this platform: document uploads, extraction review, source passages, and streamed conversations.
+**Clarity** is the React workspace for this platform: document uploads, side-by-side original-PDF/parsed-content review, extraction findings, source passages, and streamed conversations.
 
 Live workspace: [Clarity](http://32.236.61.231/). Sign in with an existing account or explore the clearly labeled demo without signing in. The IP deployment uses HTTP; use demo records only until HTTPS is configured.
 
@@ -13,7 +13,7 @@ Authentication tokens are held in browser session storage and cleared on sign-ou
 
 The Docker API requests embeddings from an authenticated, internal-only endpoint in the worker process. Ingestion and search share one model instance and a persistent model cache, reducing memory use on the small EC2 host. The worker port is not published. Locally, without `EMBEDDING_SERVICE_URL`, embedding inference runs in-process.
 
-A production-style proof of concept demonstrating asynchronous document ingestion, structured clinical entity extraction, semantic vector search, and evidence-grounded agentic question answering over synthetic records.
+A document intelligence platform combining asynchronous ingestion, structured clinical entity extraction, semantic search, and evidence-grounded question answering. The bundled example records are synthetic; deployments should use synthetic or de-identified data unless the operator has completed a separate data-protection review.
 
 ---
 
@@ -48,7 +48,7 @@ A production-style proof of concept demonstrating asynchronous document ingestio
 ```
 
 The pipeline is designed around defense-in-depth security principles:
-1. **Durable Asynchronous Ingestion**: The API performs bounded format/size checks, stores the source briefly in a private shared volume, and commits a PostgreSQL job. A separate Python worker parses pages, extracts tables and figures, redacts extracted text, and resumes persisted element/chunk checkpoints after a crash. API restarts do not lose queued jobs; the raw upload is deleted after partitioning.
+1. **Durable Asynchronous Ingestion**: The API performs bounded format/size checks, stores the source in a private shared volume, and commits a PostgreSQL job. A separate Python worker parses pages, extracts tables and figures, redacts extracted text, and resumes persisted element/chunk checkpoints after a crash. API restarts do not lose queued jobs. The staging upload is deleted after partitioning; a private copy of new PDFs remains available for the authenticated review screen until that document is deleted.
 2. **Deterministic Multi-Tenancy**: Data access, tool execution, and query lookups are strictly bound to the authenticated user on the server side.
 3. **Evidence-Gated Answering**: The clinical QA agent requires explicit source grounding and withholds answers if relevant sources are absent.
 
@@ -66,12 +66,12 @@ The pipeline is designed around defense-in-depth security principles:
 - **Server-Sent Events (SSE) Streaming:** `/chat/stream` streams answer tokens in real time, then emits cited source metadata.
 - **Focused agent tools:** Search passages, retrieve a saved extraction, and load neighboring chunks from a retrieved document; every lookup uses the authenticated user scope.
 - **Document and conversation API:** List, inspect, and delete the authenticated user's uploaded documents; retrieve per-chunk extraction outcomes and list or reopen conversation history.
-- **Page-aware provenance:** PDF chunks retain their source upload, chunk order, and page number so citations and related-chunk retrieval can point back to the source location.
+- **Page-aware provenance:** PDF chunks retain their source upload, chunk order, page number, and element region. The review screen links parsed text, tables, and figures to highlighted regions of the original page; citations and related-chunk retrieval can point back to the source location. Earlier documents without retained originals or regions still expose their indexed passages.
 - **Mixed-content PDF processing:** PyMuPDF extracts ordered text, structured table passages, and bounded image/figure elements with page, section, and nearby-text context. Images are stored in a private Docker volume, described for semantic retrieval, and attached to the final vision-model answer when retrieved; citations can display the original figure. Up to 30 visuals per PDF are indexed.
 - **Large-file API responsiveness:** The API queues the original upload quickly; PDF parsing, redaction, image description, embedding, and extraction happen in the separate recoverable worker. Page count, file size, image count, and image bytes are bounded.
 - **Extraction outcome reporting:** Jobs distinguish successful ingestion with extraction errors, and extraction records expose per-chunk success/failure state and error type rather than hiding fallback results.
 - **Queue recovery:** One ingestion job per worker process; three attempts maximum with bounded backoff. Leases prevent concurrent ownership and fence stale workers before chunk commits. Extraction/provider failures remain explicitly visible as `completed_with_errors`.
-- **Retention:** Durable terminal job records expire after 30 days; idempotency keys after 24 hours. Raw PDF uploads are removed after partitioning (and stale orphan uploads are swept); extracted text is redacted before persistence/model calls. Image pixels are retained privately for source inspection and vision answering until the authenticated document is deleted. Only use synthetic or de-identified records: visual pixels are sent to the configured external LLM provider and are not OCR-redacted in this demo. Conversation history persists. Redis-only historical status remains readable until its TTL expires.
+- **Retention:** Durable terminal job records expire after 30 days; idempotency keys after 24 hours. Staging uploads are removed after partitioning (and stale orphan uploads are swept). New original PDFs and extracted visual pixels are retained privately for account-scoped source review until the document is deleted. Extracted text is redacted before persistence/model calls, but original PDFs and visual pixels are not redacted. Only use synthetic or de-identified records: visual pixels are sent to the configured external LLM provider. Conversation history persists. Redis-only historical status remains readable until its TTL expires. Earlier uploads without a saved original show their indexed passages instead.
 - **Schema migrations:** Alembic applies versioned schema migrations at API startup. Existing deployments are baselined against their existing tables; future schema changes belong in a new migration revision.
 - To apply versioned schema changes manually, install `requirements.txt` and run `alembic upgrade head` from the project root. The first revision records the current schema without dropping existing tables or data.
 - **Tenant Isolation:** Enforced JWT authentication with Bcrypt password hashing. Database queries and tool invocations strictly bind `user_id` on the backend.
@@ -107,6 +107,8 @@ The pipeline is designed around defense-in-depth security principles:
 | `GET` | `/documents` | List the authenticated user's uploaded documents | Yes |
 | `GET` | `/documents/{document_id}` | Retrieve a document and its ordered source chunks | Yes |
 | `GET` | `/documents/{document_id}/extraction` | Retrieve per-chunk extraction outcomes | Yes |
+| `GET` | `/documents/{document_id}/source` | Download the account-owned original PDF, when available | Yes |
+| `GET` | `/documents/{document_id}/pages/{page_number}/preview` | Render an account-owned PDF page for side-by-side review | Yes |
 | `GET` | `/chunks/{chunk_id}` | Open an owned passage cited by an answer | Yes |
 | `DELETE` | `/documents/{document_id}` | Delete an uploaded document and its extraction results | Yes |
 | `GET` | `/conversations` | List the authenticated user's conversations | Yes |

@@ -81,6 +81,8 @@ async def process_document_job(job_id, pages, filename, user_id, llm_provider, o
             stored_pages = await asyncio.to_thread(document_assets.persist_elements,
                                                    elements, user_id, job_id)
             if owner:
+                await asyncio.to_thread(document_assets.preserve_source_upload,
+                                        user_id, job_id, pages["source_file_ref"], filename)
                 # Persist sanitized structure before deleting the raw upload. If the
                 # worker dies before this transaction, the original remains retryable.
                 queue.progress(job_id, owner, pages=stored_pages, progress="10%",
@@ -150,7 +152,8 @@ async def process_document_job(job_id, pages, filename, user_id, llm_provider, o
                     filename=filename, file_url=f"local_text_{uuid.uuid4()}", raw_content=content,
                     user_id=user_id, source_document_id=job_id, chunk_index=index,
                     page_number=item["page_number"], element_type=item["element_type"],
-                    section_title=item.get("section_title"), visual_assets=item["visual_assets"] or None)
+                    section_title=item.get("section_title"), visual_assets=item["visual_assets"] or None,
+                    bbox=item.get("bbox"))
                 if existing is not None:
                     # A failed visual description stores only a safe placeholder; on
                     # retry update the passage and embedding with the new caption.
@@ -160,6 +163,7 @@ async def process_document_job(job_id, pages, filename, user_id, llm_provider, o
                 doc.element_type = item["element_type"]
                 doc.section_title = item.get("section_title")
                 doc.visual_assets = item["visual_assets"] or None
+                doc.bbox = item.get("bbox")
                 if error is None:
                     doc.embedding = await asyncio.to_thread(embed_text, content)
                     try:

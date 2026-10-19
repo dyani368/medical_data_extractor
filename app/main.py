@@ -239,14 +239,31 @@ def get_document(
     current_user: Annotated[user_model.User, Depends(get_current_user)],
 ):
     chunks = _document_group_rows(document_id, current_user.id, db)
+    page_count = max((chunk.page_number or 1 for chunk in chunks), default=1)
+    page_geometry = []
+    if chunks[0].source_document_id and chunks[0].filename.lower().endswith(".pdf"):
+        try:
+            import fitz
+            source = document_assets.resolve_document_source(current_user.id,
+                                                             chunks[0].source_document_id)
+            with fitz.open(source) as pdf:
+                page_count = pdf.page_count
+                page_geometry = [{"page_number": index + 1, "width": page.rect.width,
+                                  "height": page.rect.height}
+                                 for index, page in enumerate(pdf)]
+        except FileNotFoundError:
+            pass
     return {
         "document_id": chunks[0].source_document_id or f"legacy-{chunks[0].id}",
         "filename": chunks[0].filename,
         "created_at": chunks[0].created_at,
+        "page_count": page_count,
+        "pages": page_geometry,
         "chunks": [{
             "id": chunk.id, "chunk_index": chunk.chunk_index, "page_number": chunk.page_number,
             "content": chunk.raw_content, "element_type": chunk.element_type,
             "section_title": chunk.section_title,
+            "bbox": chunk.bbox,
             "visuals": [{"url": f"/chunks/{chunk.id}/visuals/{index}",
                          "mime_type": asset.get("mime_type", "image/png")}
                         for index, asset in enumerate(chunk.visual_assets or [])],
@@ -283,6 +300,74 @@ def get_document_extractions(
     }
 
 
+@app.get("/documents/{document_id}/source")
+def get_document_source(
+    document_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+):
+    """Serve the original PDF only to the account that owns its indexed chunks."""
+    from fastapi.responses import FileResponse
+    from app.services.document_assets import resolve_document_source
+
+    chunks = _document_group_rows(document_id, current_user.id, db)
+    source_id = chunks[0].source_document_id
+    if source_id is None or not chunks[0].filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=404, detail="Original PDF is not available for this record")
+    try:
+        path = resolve_document_source(current_user.id, source_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Original PDF is not available for this record")
+    return FileResponse(path, media_type="application/pdf", content_disposition_type="inline",
+                        filename=chunks[0].filename, headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/documents/{document_id}/pages/{page_number}/preview")
+def get_document_page_preview(
+    document_id: str,
+    page_number: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+):
+    """Render a bounded page image for the side-by-side document review UI."""
+    from app.services.document_assets import resolve_document_source
+
+    chunks = _document_group_rows(document_id, current_user.id, db)
+    source_id = chunks[0].source_document_id
+    if source_id is None or not chunks[0].filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=404, detail="Original PDF is not available for this record")
+    try:
+        path = resolve_document_source(current_user.id, source_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Original PDF is not available for this record")
+    return _render_document_page(path, page_number)
+
+
+def _render_document_page(path: Path, page_number: int):
+    import fitz
+    from fastapi.responses import Response
+
+    with fitz.open(path) as pdf:
+        if page_number < 1 or page_number > pdf.page_count:
+            raise HTTPException(status_code=404, detail="Page not found")
+        page = pdf.load_page(page_number - 1)
+        scale = min(1.6, (8_000_000 / max(1, page.rect.width * page.rect.height)) ** 0.5)
+        pixels = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        return Response(content=pixels.tobytes("png"), media_type="image/png",
+                        headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/samples/{sample_name}/pages/{page_number}/preview")
+def get_sample_page_preview(sample_name: str, page_number: int):
+    """The two bundled, invented examples can be previewed without an account."""
+    if sample_name not in {"cardiovascular-followup", "adverse-event-report"}:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    path = Path(__file__).resolve().parent.parent / "frontend" / "public" / "samples" / f"{sample_name}.pdf"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Sample not found")
+    return _render_document_page(path, page_number)
+
+
 @app.get("/chunks/{chunk_id}")
 def get_chunk(
     chunk_id: int,
@@ -298,6 +383,7 @@ def get_chunk(
             "chunk_index": chunk.chunk_index, "page_number": chunk.page_number,
             "source_document_id": chunk.source_document_id,
             "element_type": chunk.element_type, "section_title": chunk.section_title,
+            "bbox": chunk.bbox,
             "visuals": [{"url": f"/chunks/{chunk.id}/visuals/{index}",
                          "mime_type": asset.get("mime_type", "image/png")}
                         for index, asset in enumerate(chunk.visual_assets or [])]}

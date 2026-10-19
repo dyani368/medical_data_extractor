@@ -60,6 +60,32 @@ def persist_source_upload(content: bytes, user_id: int, source_document_id: str)
     return f"{user_id}/{name}"
 
 
+def preserve_source_upload(user_id: int, source_document_id: str, source_ref: str,
+                           filename: str) -> None:
+    """Keep a private original for the authenticated document review screen.
+
+    Copy rather than move: a worker crash before the partition checkpoint must
+    leave the staging upload available for a safe retry.
+    """
+    source = resolve_asset(source_ref, user_id)
+    if Path(filename).suffix.lower() != ".pdf":
+        return
+    directory = _root() / str(user_id) / source_document_id
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / "source.pdf"
+    temporary = directory / "source.pdf.part"
+    shutil.copyfile(source, temporary)
+    temporary.replace(target)
+
+
+def resolve_document_source(user_id: int, source_document_id: str) -> Path:
+    try:
+        uuid.UUID(source_document_id)
+    except (TypeError, ValueError) as exc:
+        raise FileNotFoundError("Original document not available") from exc
+    return resolve_asset(f"{user_id}/{source_document_id}/source.pdf", user_id)
+
+
 def delete_source_upload(user_id: int, source_ref: str) -> None:
     try:
         resolve_asset(source_ref, user_id).unlink(missing_ok=True)
