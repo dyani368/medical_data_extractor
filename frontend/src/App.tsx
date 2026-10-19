@@ -5,6 +5,7 @@ import { ApiError, newKey, request, requestBlob, setAccessToken, streamChat } fr
 import type { Conversation, DocumentDetail, DocumentSummary, Extraction, Job, Message, Passage, Source, User } from './types'
 import { demoDetails, demoDocuments, demoExtractions, demoMessages, demoPassage } from './demo'
 import DocumentWorkspace from './DocumentWorkspace'
+import HomePage from './HomePage'
 
 const cleanName = (name: string) => name.replace(/_chunk_\d+$/, '').replace(/_/g, ' ')
 const shortDate = (value: string) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -15,7 +16,7 @@ function Brand({ dark = false }: { dark?: boolean }) {
   return <div className={`brand ${dark ? 'brand-light' : ''}`}><span className="brand-mark"><FileSearch size={23} strokeWidth={1.7} /></span><span>clarity<span className="brand-dot">.</span></span></div>
 }
 
-function AuthScreen({ onLogin, onDemo, message }: { onLogin: (token: string, user: User) => void; onDemo: () => void; message: string }) {
+function AuthScreen({ onLogin, onDemo, onHome, message }: { onLogin: (token: string, user: User) => void; onDemo: () => void; onHome: () => void; message: string }) {
   const [register, setRegister] = useState(false)
   const [username, setUsername] = useState(''), [email, setEmail] = useState(''), [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false), [error, setError] = useState('')
@@ -43,7 +44,7 @@ function AuthScreen({ onLogin, onDemo, message }: { onLogin: (token: string, use
       </div><div className="auth-story-footer">Built to make the evidence easy to see.<span>01 / 03</span></div>
     </section>
     <section className="auth-form-wrap"><div className="auth-form">
-      <div className="auth-small-brand"><Brand /></div><span className="eyebrow">CLINICAL DOCUMENT WORKSPACE</span><h2>{register ? 'Create your workspace.' : 'Understand every document.'}</h2><p>{register ? 'Create an account to review PDFs, extracted findings, and source-grounded answers.' : 'Clarity processes PDF records, shows what it extracted, and answers questions with source passages. Sign in to continue.'}</p>
+      <button className="auth-home-link" onClick={onHome}><ArrowLeft size={15} /> Back to Clarity</button><div className="auth-small-brand"><Brand /></div><span className="eyebrow">CLINICAL DOCUMENT WORKSPACE</span><h2>{register ? 'Create your workspace.' : 'Sign in to your workspace.'}</h2><p>{register ? 'Create an account to review PDFs, extracted findings, and source-grounded answers.' : 'Continue to your documents, extracted findings, and source-linked answers.'}</p>
       <div className="auth-toggle"><button type="button" className={!register ? 'active' : ''} onClick={() => { setRegister(false); setError('') }}>Sign in</button><button type="button" className={register ? 'active' : ''} onClick={() => { setRegister(true); setError('') }}>Create account</button></div>
       <form onSubmit={submit}><label>Username<input autoComplete="username" minLength={register ? 3 : 1} maxLength={50} required value={username} onChange={event => setUsername(event.target.value)} placeholder="Your username" /></label>
         {register && <label>Email address<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" /></label>}
@@ -234,21 +235,27 @@ function Workspace({ user, demo, onLogout }: { user: User; demo: boolean; onLogo
 }
 
 export default function App() {
+  const [route, setRoute] = useState<'home' | 'login' | 'app'>(() => window.location.pathname === '/login' ? 'login' : window.location.pathname === '/app' ? 'app' : 'home')
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('clarity.token'))
   const [sessionRetry, setSessionRetry] = useState(0)
   const [user, setUser] = useState<User | null>(null), [checking, setChecking] = useState(!!token), [demo, setDemo] = useState(false), [message, setMessage] = useState('')
   setAccessToken(token)
-  const logout = useCallback(() => { setAccessToken(null); sessionStorage.removeItem('clarity.token'); setToken(null); setUser(null); setDemo(false); setChecking(false) }, [])
+  const navigate = useCallback((path: '/' | '/login' | '/app') => { window.history.pushState({}, '', path); setRoute(path === '/' ? 'home' : path === '/login' ? 'login' : 'app'); window.scrollTo(0, 0) }, [])
+  const logout = useCallback(() => { setAccessToken(null); sessionStorage.removeItem('clarity.token'); setToken(null); setUser(null); setDemo(false); setChecking(false); navigate('/') }, [navigate])
+  useEffect(() => { const onPopState = () => setRoute(window.location.pathname === '/login' ? 'login' : window.location.pathname === '/app' ? 'app' : 'home'); window.addEventListener('popstate', onPopState); return () => window.removeEventListener('popstate', onPopState) }, [])
   useEffect(() => {
     if (!token) { setChecking(false); return }
     let canceled = false; setChecking(true); setMessage('')
     request<User>('/me').then(user => { if (!canceled) setUser(user) }).catch(error => { if (!canceled) { if (error instanceof ApiError && error.status === 401) logout(); setMessage(errorText(error)) } }).finally(() => { if (!canceled) setChecking(false) })
     return () => { canceled = true }
   }, [token, logout, sessionRetry])
-  useEffect(() => { function expired() { logout(); setMessage('Your session expired. Sign in to continue.') } window.addEventListener('session-expired', expired); return () => window.removeEventListener('session-expired', expired) }, [logout])
+  useEffect(() => { function expired() { logout(); setMessage('Your session expired. Sign in to continue.'); navigate('/login') } window.addEventListener('session-expired', expired); return () => window.removeEventListener('session-expired', expired) }, [logout, navigate])
+  if (route === 'home') return <HomePage authenticated={!!user} onSignIn={() => navigate('/login')} onWorkspace={() => navigate('/app')} onSample={() => { setDemo(true); navigate('/app') }} />
+  const auth = <AuthScreen message={message} onHome={() => navigate('/')} onDemo={() => { setMessage(''); setDemo(true); navigate('/app') }} onLogin={(token, user) => { sessionStorage.setItem('clarity.token', token); setAccessToken(token); setToken(token); setUser(user); setMessage(''); setDemo(false); navigate('/app') }} />
+  if (route === 'login') return auth
   if (checking) return <div className="boot-screen"><Brand /><Loader2 className="spin" size={24} /><p>Opening your workspace…</p></div>
-  if (demo) return <Workspace key="demo" user={{ id: 0, username: 'Demo' }} demo onLogout={logout} />
-  if (token && !user) return <div className="boot-screen"><Brand /><AlertCircle size={24} /><p>We couldn’t reconnect to your workspace.</p><p>{message}</p><button className="button primary" onClick={() => setSessionRetry(value => value + 1)}>Retry connection</button><button className="button outline" onClick={logout}>Return to sign in</button></div>
-  if (!token || !user) return <AuthScreen message={message} onDemo={() => { setMessage(''); setDemo(true) }} onLogin={(token, user) => { sessionStorage.setItem('clarity.token', token); setAccessToken(token); setToken(token); setUser(user); setMessage('') }} />
+  if (demo) return <Workspace key="demo" user={{ id: 0, username: 'Demo' }} demo onLogout={() => { setDemo(false); navigate('/login') }} />
+  if (token && !user) return <div className="boot-screen"><Brand /><AlertCircle size={24} /><p>We couldn’t reconnect to your workspace.</p><p>{message}</p><button className="button primary" onClick={() => setSessionRetry(value => value + 1)}>Retry connection</button><button className="button outline" onClick={() => { logout(); navigate('/login') }}>Return to sign in</button></div>
+  if (!token || !user) return auth
   return <Workspace key={user.id} user={user} demo={false} onLogout={logout} />
 }
