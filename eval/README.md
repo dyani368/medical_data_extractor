@@ -1,6 +1,6 @@
 # Small synthetic RAG evaluation
 
-This is a learning and regression-check corpus, not evidence of clinical quality. The eight fictional PDFs cover narrative notes, adverse-event reports, tabular labs, imaging, discharge, research, pathology, and medication reconciliation. The JSON records 40 questions, expected facts, an exact evidence quote when answerable, and two conversational follow-up pairs. Eleven questions are intentionally unanswerable or test privacy boundaries.
+This is a learning and regression-check corpus, not evidence of clinical quality. The nine fictional PDFs cover narrative notes, adverse-event reports, tabular labs, imaging, discharge, research, pathology, medication reconciliation, and a chart embedded as a raster figure. The JSON records 41 questions, expected facts, exact evidence quotes where available, a multimodal visual question, and two conversational follow-up pairs. Eleven questions are intentionally unanswerable or test privacy boundaries.
 
 ## Set it up
 
@@ -28,7 +28,8 @@ This is a learning and regression-check corpus, not evidence of clinical quality
 
 - Per-request wall-clock latency, status, response, and conversation ID.
 - Median and linearly interpolated p95 latency over successful responses, separately for search and agent.
-- Retrieval hit@5: whether the exact expected evidence quote appears in the top-five `/search` passages for answerable questions.
+- Evidence hit@5: whether the exact expected evidence quote appears in the top-five `/search` passages for answerable questions.
+- Expected-source recall@5 and MRR@5: whether the expected document is retrieved and how highly it ranks. This remains measurable for visual questions whose generated descriptions cannot have a fixed exact quote.
 - Follow-up cases pass the prior response's `conversation_id` within each paired conversation.
 
 Each request is sequential. `--repeats 3` runs each question three times: 120 calls to each endpoint, 240 HTTP requests total. This is an evaluation run, not a concurrency/load test. The first model/embedding call may be a cold start; the CSV preserves each duration so it can be examined separately.
@@ -42,7 +43,7 @@ Open `eval/results.csv` in a spreadsheet. For each **agent** row, fill:
 - `citation_supported`: yes when every factual claim is backed by the cited passage, not just when an ID exists.
 - `privacy_safe`: yes when privacy-test questions do not expose another account's or person's data.
 
-Then recalculate the counts without making API calls:
+For Q41, manually inspect whether the chart question is answered from the embedded figure and whether the source citation resolves to the chart passage. The summary reports this multimodal subset separately. Then recalculate the counts without making API calls:
 
 ```powershell
 python tools/run_rag_eval.py --summary-only

@@ -18,6 +18,7 @@ services:
     image: amgen-poc-api:latest
     volumes:
       - hf_cache:/root/.cache/huggingface
+      - document_assets:/app/data/document-assets
     expose:
       - "8000"
     env_file:
@@ -45,6 +46,7 @@ services:
     image: amgen-poc-api:latest
     volumes:
       - hf_cache:/root/.cache/huggingface
+      - document_assets:/app/data/document-assets
     command: ["python", "-m", "app.worker"]
     env_file: .env
     environment:
@@ -98,3 +100,4 @@ volumes:
   hf_cache:
   pgdata:
   n8n_data:
+  document_assets:

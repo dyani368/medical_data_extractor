@@ -31,7 +31,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.providers.openai_provider import OpenAIProvider
 from app.routers import auth
 from app.services import ingestion_queue
-from app.services.document_parser import MAX_UPLOAD_BYTES, extract_document_pages
+from app.services.document_parser import MAX_UPLOAD_BYTES, validate_document_upload
+from app.services import document_assets
 from app.core.redis_client import get_redis
 
 import uuid
@@ -127,12 +128,18 @@ async def upload_document(
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File is too large")
-    pages = extract_document_pages(content, file.filename, file.content_type)
+    await asyncio.to_thread(validate_document_upload, content, file.filename, file.content_type)
     safe_filename = await asyncio.to_thread(sanitize, os.path.basename(file.filename or "document"))
-
-    safe_pages = [(page, await asyncio.to_thread(sanitize, text)) for page, text in pages]
-    job_id = await asyncio.to_thread(ingestion_queue.enqueue, safe_pages, safe_filename,
-                                    current_user.id, idempotency_key, content)
+    source_document_id = str(uuid.uuid4())
+    source_ref = await asyncio.to_thread(document_assets.persist_source_upload, content,
+                                         current_user.id, source_document_id)
+    payload = {"source_file_ref": source_ref, "content_type": file.content_type}
+    try:
+        job_id = await asyncio.to_thread(ingestion_queue.enqueue, payload, safe_filename,
+                                        current_user.id, idempotency_key, content, source_document_id)
+    except Exception:
+        await asyncio.to_thread(document_assets.delete_source_upload, current_user.id, source_ref)
+        raise
 
     return {"status": "accepted", "job_id": job_id, "document_id": job_id,
             "message": "Document ingestion queued for async processing."}
@@ -238,7 +245,11 @@ def get_document(
         "created_at": chunks[0].created_at,
         "chunks": [{
             "id": chunk.id, "chunk_index": chunk.chunk_index, "page_number": chunk.page_number,
-            "content": chunk.raw_content,
+            "content": chunk.raw_content, "element_type": chunk.element_type,
+            "section_title": chunk.section_title,
+            "visuals": [{"url": f"/chunks/{chunk.id}/visuals/{index}",
+                         "mime_type": asset.get("mime_type", "image/png")}
+                        for index, asset in enumerate(chunk.visual_assets or [])],
         } for chunk in chunks],
     }
 
@@ -285,7 +296,35 @@ def get_chunk(
         raise HTTPException(status_code=404, detail="Source passage not found")
     return {"id": chunk.id, "filename": chunk.filename, "content": chunk.raw_content,
             "chunk_index": chunk.chunk_index, "page_number": chunk.page_number,
-            "source_document_id": chunk.source_document_id}
+            "source_document_id": chunk.source_document_id,
+            "element_type": chunk.element_type, "section_title": chunk.section_title,
+            "visuals": [{"url": f"/chunks/{chunk.id}/visuals/{index}",
+                         "mime_type": asset.get("mime_type", "image/png")}
+                        for index, asset in enumerate(chunk.visual_assets or [])]}
+
+
+@app.get("/chunks/{chunk_id}/visuals/{asset_index}")
+def get_chunk_visual(
+    chunk_id: int,
+    asset_index: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[user_model.User, Depends(get_current_user)],
+):
+    from fastapi.responses import FileResponse
+    from app.services.document_assets import resolve_asset
+
+    chunk = db.execute(select(Document).where(
+        Document.id == chunk_id, Document.user_id == current_user.id,
+    )).scalar_one_or_none()
+    if chunk is None or asset_index < 0 or asset_index >= len(chunk.visual_assets or []):
+        raise HTTPException(status_code=404, detail="Visual evidence not found")
+    asset = chunk.visual_assets[asset_index]
+    try:
+        path = resolve_asset(asset["asset_ref"], current_user.id)
+    except (FileNotFoundError, KeyError):
+        raise HTTPException(status_code=404, detail="Visual evidence not found")
+    return FileResponse(path, media_type=asset.get("mime_type", "image/png"),
+                        content_disposition_type="inline")
 
 
 @app.delete("/documents/{document_id}")
@@ -307,6 +346,9 @@ def delete_document(
     for chunk in chunks:
         db.delete(chunk)
     db.commit()
+    if chunks[0].source_document_id:
+        from app.services.document_assets import delete_document_assets
+        delete_document_assets(current_user.id, chunks[0].source_document_id)
     return {"document_id": document_id, "deleted_chunks": count}
 
 

@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     groq_api_key: str
     redis_url: str = "redis://localhost:6379/0"
     embedding_service_url: str | None = None  # Docker API uses the private worker endpoint.
+    document_asset_dir: str = "data/document-assets"
+    vision_model: str = "qwen/qwen3.8-27b"
     
     secret_key: str
     algorithm: str = "HS256"

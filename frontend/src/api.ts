@@ -21,6 +21,18 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   return response.json() as Promise<T>
 }
 
+export async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(`/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event('session-expired'))
+    throw new ApiError(`Could not load source visual (${response.status}).`, response.status)
+  }
+  return response.blob()
+}
+
 export function newKey() {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')

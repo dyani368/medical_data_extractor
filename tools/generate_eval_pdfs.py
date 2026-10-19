@@ -1,17 +1,39 @@
 """Create the eight one-page synthetic documents listed in eval/corpus.json."""
 import json
+from io import BytesIO
 from pathlib import Path
 
+import fitz
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = json.loads((ROOT / "eval" / "corpus.json").read_text(encoding="utf-8"))
 OUT = ROOT / "output" / "pdf" / "eval_corpus"
+
+
+def symptom_chart_png():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360">
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <text x="360" y="36" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#183b32">Symptom severity by study day</text>
+      <line x1="95" y1="285" x2="670" y2="285" stroke="#34433c" stroke-width="2"/>
+      <line x1="95" y1="65" x2="95" y2="285" stroke="#34433c" stroke-width="2"/>
+      <text x="25" y="80" font-family="sans-serif" font-size="14">10</text>
+      <text x="36" y="188" font-family="sans-serif" font-size="14">5</text>
+      <text x="42" y="290" font-family="sans-serif" font-size="14">0</text>
+      <text x="22" y="162" transform="rotate(-90 22 162)" font-family="sans-serif" font-size="15">Score (0-10)</text>
+      <rect x="145" y="241" width="78" height="44" fill="#79a98a"/><text x="184" y="231" text-anchor="middle" font-family="sans-serif" font-size="16">2</text><text x="184" y="313" text-anchor="middle" font-family="sans-serif" font-size="15">Day 1</text>
+      <rect x="275" y="175" width="78" height="110" fill="#79a98a"/><text x="314" y="165" text-anchor="middle" font-family="sans-serif" font-size="16">5</text><text x="314" y="313" text-anchor="middle" font-family="sans-serif" font-size="15">Day 2</text>
+      <rect x="405" y="109" width="78" height="176" fill="#c66b55"/><text x="444" y="99" text-anchor="middle" font-family="sans-serif" font-size="16">8</text><text x="444" y="313" text-anchor="middle" font-family="sans-serif" font-size="15">Day 3</text>
+      <rect x="535" y="219" width="78" height="66" fill="#79a98a"/><text x="574" y="209" text-anchor="middle" font-family="sans-serif" font-size="16">3</text><text x="574" y="313" text-anchor="middle" font-family="sans-serif" font-size="15">Day 4</text>
+    </svg>"""
+    svg_doc = fitz.open(stream=svg.encode("utf-8"), filetype="svg")
+    pdf_doc = fitz.open(stream=svg_doc.convert_to_pdf(), filetype="pdf")
+    return pdf_doc[0].get_pixmap(matrix=fitz.Matrix(1.2, 1.2), alpha=False).tobytes("png")
 
 
 def make_pdf(document):
@@ -44,6 +66,12 @@ def make_pdf(document):
             ("BOTTOMPADDING", (0,0),(-1,-1),7),
         ]))
         story.append(table)
+    elif document["style"] == "chart":
+        for heading, body in document["sections"].items():
+            story.append(KeepTogether([Paragraph(heading, styles["Section"]),
+                                       Paragraph(body.replace("&", "&amp;"), styles["BodySmall"])]))
+        story.append(Spacer(1, 10))
+        story.append(Image(BytesIO(symptom_chart_png()), width=6.35*inch, height=3.17*inch))
     else:
         for heading, body in document["sections"].items():
             story.append(KeepTogether([Paragraph(heading, styles["Section"]),

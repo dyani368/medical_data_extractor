@@ -48,7 +48,7 @@ A production-style proof of concept demonstrating asynchronous document ingestio
 ```
 
 The pipeline is designed around defense-in-depth security principles:
-1. **Durable Asynchronous Ingestion**: The API validates and redacts uploads, then commits a PostgreSQL job. A separate Python worker claims jobs with `FOR UPDATE SKIP LOCKED`, renews a 90-second lease, and resumes completed chunk checkpoints after a crash. API restarts do not lose queued jobs.
+1. **Durable Asynchronous Ingestion**: The API performs bounded format/size checks, stores the source briefly in a private shared volume, and commits a PostgreSQL job. A separate Python worker parses pages, extracts tables and figures, redacts extracted text, and resumes persisted element/chunk checkpoints after a crash. API restarts do not lose queued jobs; the raw upload is deleted after partitioning.
 2. **Deterministic Multi-Tenancy**: Data access, tool execution, and query lookups are strictly bound to the authenticated user on the server side.
 3. **Evidence-Gated Answering**: The clinical QA agent requires explicit source grounding and withholds answers if relevant sources are absent.
 
@@ -56,7 +56,7 @@ The pipeline is designed around defense-in-depth security principles:
 
 ## Features
 
-- **Asynchronous Ingestion & Job Tracking:** Accepts UTF-8 text and PDF documents, extracts text, and processes documents in the background (`GET /jobs/{job_id}`).
+- **Asynchronous Ingestion & Job Tracking:** Accepts UTF-8 text and PDFs up to 20 MB/100 pages; the worker parses the document off the API process and reports progress through `GET /jobs/{job_id}`.
 - **Idempotency Support:** Supports `Idempotency-Key` headers on `/upload` to safely handle client retries.
 - **Automated PII/PHI Redaction:** Integrates Microsoft Presidio for automated text sanitization prior to model provider transmission and persistence.
 - **Recursive Chunking & Embeddings:** Documents are partitioned via `RecursiveCharacterTextSplitter` (500-char chunks, 50 overlap) and embedded into 384-dimensional dense vectors using HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`).
@@ -67,9 +67,11 @@ The pipeline is designed around defense-in-depth security principles:
 - **Focused agent tools:** Search passages, retrieve a saved extraction, and load neighboring chunks from a retrieved document; every lookup uses the authenticated user scope.
 - **Document and conversation API:** List, inspect, and delete the authenticated user's uploaded documents; retrieve per-chunk extraction outcomes and list or reopen conversation history.
 - **Page-aware provenance:** PDF chunks retain their source upload, chunk order, and page number so citations and related-chunk retrieval can point back to the source location.
+- **Mixed-content PDF processing:** PyMuPDF extracts ordered text, structured table passages, and bounded image/figure elements with page, section, and nearby-text context. Images are stored in a private Docker volume, described for semantic retrieval, and attached to the final vision-model answer when retrieved; citations can display the original figure. Up to 30 visuals per PDF are indexed.
+- **Large-file API responsiveness:** The API queues the original upload quickly; PDF parsing, redaction, image description, embedding, and extraction happen in the separate recoverable worker. Page count, file size, image count, and image bytes are bounded.
 - **Extraction outcome reporting:** Jobs distinguish successful ingestion with extraction errors, and extraction records expose per-chunk success/failure state and error type rather than hiding fallback results.
 - **Queue recovery:** One ingestion job per worker process; three attempts maximum with bounded backoff. Leases prevent concurrent ownership and fence stale workers before chunk commits. Extraction/provider failures remain explicitly visible as `completed_with_errors`.
-- **Retention:** Durable terminal job records expire after 30 days; idempotency keys after 24 hours. Redacted queued text is cleared when jobs finish. The worker periodically removes expired terminal jobs, never active jobs. Uploaded documents can be deleted through the authenticated library/API; conversation history persists. Redis-only historical status remains readable until its TTL expires.
+- **Retention:** Durable terminal job records expire after 30 days; idempotency keys after 24 hours. Raw PDF uploads are removed after partitioning (and stale orphan uploads are swept); extracted text is redacted before persistence/model calls. Image pixels are retained privately for source inspection and vision answering until the authenticated document is deleted. Only use synthetic or de-identified records: visual pixels are sent to the configured external LLM provider and are not OCR-redacted in this demo. Conversation history persists. Redis-only historical status remains readable until its TTL expires.
 - **Schema migrations:** Alembic applies versioned schema migrations at API startup. Existing deployments are baselined against their existing tables; future schema changes belong in a new migration revision.
 - To apply versioned schema changes manually, install `requirements.txt` and run `alembic upgrade head` from the project root. The first revision records the current schema without dropping existing tables or data.
 - **Tenant Isolation:** Enforced JWT authentication with Bcrypt password hashing. Database queries and tool invocations strictly bind `user_id` on the backend.

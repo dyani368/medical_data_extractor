@@ -3,3 +3,4 @@ venv/
 __pycache__/
 .pnpm-store/
 .pytest_cache/
+data/document-assets/

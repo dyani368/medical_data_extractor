@@ -10,6 +10,7 @@ from app.services import doc_search
 from app.services import agent_tools
 from app.services.conversation_service import get_or_create_conversation, get_conversation_history, save_message
 from app.models.audit_model import AgentAuditLog
+from app.services.document_assets import read_asset_data_url
 
 def redact_text(text: str) -> str:
     from app.core.sanitize import sanitize
@@ -81,9 +82,39 @@ def format_search_results(docs) -> tuple[str, list[dict]]:
         page_number = getattr(doc, "page_number", None)
         if page_number is not None:
             source["page_number"] = page_number
+        element_type = getattr(doc, "element_type", "text") or "text"
+        section_title = getattr(doc, "section_title", None)
+        if element_type != "text":
+            source["element_type"] = element_type
+        if section_title:
+            source["section_title"] = section_title
         sources.append(source)
-        passages.append(f"[doc:{doc.id}] {redact_text(doc.raw_content)}")
+        label = f"[{element_type}" + (f" · {section_title}" if section_title else "") + "]"
+        passages.append(f"[doc:{doc.id}] {label} {redact_text(doc.raw_content)}")
     return "\n\n".join(passages) if passages else "No relevant records found.", sources
+
+
+def load_visual_evidence(sources, user_id, db):
+    """Load at most three retrieved image chunks, scoped to the authenticated user."""
+    image_ids = [source["document_id"] for source in sources
+                 if source.get("element_type") == "image"]
+    if not image_ids:
+        return []
+    docs = db.execute(select(Document).where(
+        Document.user_id == user_id, Document.id.in_(image_ids)
+    ).order_by(Document.id).limit(3)).scalars().all()
+    visuals = []
+    for doc in docs:
+        for asset in doc.visual_assets or []:
+            try:
+                visuals.append({"document_id": doc.id, "filename": redact_text(doc.filename),
+                    "page_number": doc.page_number,
+                    "data_url": read_asset_data_url(asset["asset_ref"], user_id, asset.get("mime_type"))})
+            except (FileNotFoundError, KeyError):
+                logger.warning("Visual evidence missing for document %s", doc.id)
+            if len(visuals) >= 3:
+                return visuals
+    return visuals
 
 
 def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Session) -> dict:
@@ -225,13 +256,29 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
 
         # Save final assistant response
         answer = response_message.content or NO_EVIDENCE
+        visuals = await run_blocking(load_visual_evidence, sources, user_id, db)
+        if visuals and hasattr(llm_provider, "answer_with_visuals"):
+            try:
+                answer = await llm_provider.answer_with_visuals(messages, visuals) or answer
+            except Exception as error:
+                logger.warning("Visual answer generation failed; retaining grounded text answer (%s)",
+                               type(error).__name__)
         save_message(db, conv.id, "assistant", answer)
 
         return {"response": answer, "conversation_id": conv.id, "sources": cited_sources(answer, sources)}
 
     if previous_sources:
-        save_message(db, conv.id, "assistant", response_message.content)
-        return {"response": response_message.content or NO_EVIDENCE, "conversation_id": conv.id, "sources": cited_sources(response_message.content, previous_sources)}
+        answer = response_message.content or NO_EVIDENCE
+        visuals = await run_blocking(load_visual_evidence, previous_sources, user_id, db)
+        if visuals and hasattr(llm_provider, "answer_with_visuals"):
+            try:
+                answer = await llm_provider.answer_with_visuals(messages, visuals) or answer
+            except Exception as error:
+                logger.warning("Follow-up visual answer failed; retaining grounded text answer (%s)",
+                               type(error).__name__)
+        save_message(db, conv.id, "assistant", answer)
+        return {"response": answer, "conversation_id": conv.id,
+                "sources": cited_sources(answer, previous_sources)}
 
     # Clinical answers require retrieved evidence even if the model skips tools.
     save_message(db, conv.id, "assistant", NO_EVIDENCE)
@@ -267,13 +314,21 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
 
         # Preserve token delivery after the bounded tool loop has finished.
         final_content = ""
-        async for chunk in llm_provider.run_agent_stream(messages):
-            yield chunk
-            if chunk.startswith("data: "):
-                content_chunk = chunk[6:]
-                if content_chunk.endswith("\n\n"):
-                    content_chunk = content_chunk[:-2]
-                final_content += content_chunk
+        visuals = await run_blocking(load_visual_evidence, sources, user_id, db)
+        if visuals and hasattr(llm_provider, "stream_answer_with_visuals"):
+            try:
+                async for chunk in llm_provider.stream_answer_with_visuals(messages, visuals):
+                    yield chunk
+                    if chunk.startswith("data: "):
+                        final_content += chunk[6:].removesuffix("\n\n")
+            except Exception as error:
+                logger.warning("Visual stream failed after %s characters (%s)", len(final_content),
+                               type(error).__name__)
+        else:
+            async for chunk in llm_provider.run_agent_stream(messages):
+                yield chunk
+                if chunk.startswith("data: "):
+                    final_content += chunk[6:].removesuffix("\n\n")
         if not final_content:
             final_content = response_message.content or NO_EVIDENCE
         save_message(db, conv.id, "assistant", final_content)
@@ -282,8 +337,22 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
 
     if previous_sources:
         content = response_message.content or NO_EVIDENCE
+        visuals = await run_blocking(load_visual_evidence, previous_sources, user_id, db)
+        if visuals and hasattr(llm_provider, "stream_answer_with_visuals"):
+            streamed = ""
+            try:
+                async for chunk in llm_provider.stream_answer_with_visuals(messages, visuals):
+                    yield chunk
+                    if chunk.startswith("data: "):
+                        streamed += chunk[6:].removesuffix("\n\n")
+                content = streamed or content
+            except Exception as error:
+                logger.warning("Follow-up visual stream failed after %s characters (%s)", len(streamed),
+                               type(error).__name__)
+                content = streamed or content
+        else:
+            yield f"data: {content}\n\n"
         yield f"event: sources\ndata: {json.dumps(cited_sources(content, previous_sources))}\n\n"
-        yield f"data: {content}\n\n"
         save_message(db, conv.id, "assistant", content)
         return
 

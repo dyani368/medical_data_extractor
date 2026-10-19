@@ -35,8 +35,11 @@ def client(monkeypatch):
     redis = FakeRedis()
     monkeypatch.setattr(main, "initialize_database", lambda: None)
     monkeypatch.setattr(main, "get_redis", lambda: redis)
+    monkeypatch.setattr(main.document_assets, "persist_source_upload",
+                        lambda content, user_id, source_id: f"{user_id}/{source_id}.upload")
+    monkeypatch.setattr(main.document_assets, "delete_source_upload", lambda *args: None)
 
-    def enqueue(pages, filename, user_id, key, content):
+    def enqueue(pages, filename, user_id, key, content, source_document_id=None):
         import uuid
         existing = redis.get(f"idempotency:{user_id}:{key}") if key else None
         if existing:
@@ -91,6 +94,15 @@ def test_upload_rejects_invalid_text(client):
         "/upload", headers=headers, files={"file": ("empty.txt", b"  ", "text/plain")}
     )
     assert empty.status_code == 400
+
+
+def test_pdf_upload_is_queued_without_parsing_in_api_process(client):
+    response = client.post(
+        "/upload", headers={"X-Test-User": "42"},
+        files={"file": ("large.pdf", b"%PDF-1.7 worker parses this", "application/pdf")},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
 
 
 def test_liveness_does_not_require_authentication(client):

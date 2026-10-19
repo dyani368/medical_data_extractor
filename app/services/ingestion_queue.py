@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models.ingestion_job_model import IngestionJob
+from app.services import document_assets
 
 MAX_ATTEMPTS = 3
 LEASE_SECONDS = 90
@@ -18,7 +19,11 @@ class LeaseLost(Exception):
     pass
 
 
-def enqueue(pages, filename, user_id, key, content):
+def _cleanup_upload(user_id, job_id):
+    document_assets.delete_source_upload(user_id, f"{user_id}/{job_id}.upload")
+
+
+def enqueue(pages, filename, user_id, key, content, source_document_id=None):
     if key and len(key) > 200:
         raise HTTPException(400, "Idempotency key is too long")
     now = datetime.now(UTC)
@@ -31,11 +36,16 @@ def enqueue(pages, filename, user_id, key, content):
             existing = db.scalar(select(IngestionJob).where(
                 IngestionJob.user_id == user_id, IngestionJob.idempotency_key == key))
             if existing:
+                if isinstance(pages, dict) and pages.get("source_file_ref"):
+                    document_assets.delete_source_upload(user_id, pages["source_file_ref"])
                 if existing.content_digest != digest:
                     raise HTTPException(409, "This idempotency key was already used for a different file")
                 return existing.id
-        job = IngestionJob(id=str(uuid.uuid4()), user_id=user_id, filename=filename,
-            pages=pages, content_digest=digest, idempotency_key=key,
+        job_id = source_document_id or str(uuid.uuid4())
+        stored_pages = (pages if isinstance(pages, dict) and pages.get("source_file_ref")
+                        else document_assets.persist_elements(pages, user_id, job_id))
+        job = IngestionJob(id=job_id, user_id=user_id, filename=filename,
+            pages=stored_pages, content_digest=digest, idempotency_key=key,
             idempotency_expires_at=now + timedelta(days=1), next_attempt_at=now,
             expires_at=now + timedelta(seconds=settings.job_retention_seconds))
         db.add(job)
@@ -43,6 +53,9 @@ def enqueue(pages, filename, user_id, key, content):
             db.commit()
         except IntegrityError:
             db.rollback()
+            document_assets.delete_document_assets(user_id, job_id)
+            if isinstance(pages, dict) and pages.get("source_file_ref"):
+                document_assets.delete_source_upload(user_id, pages["source_file_ref"])
             if not key:
                 raise
             existing = db.scalar(select(IngestionJob).where(
@@ -52,6 +65,12 @@ def enqueue(pages, filename, user_id, key, content):
             if existing.content_digest != digest:
                 raise HTTPException(409, "This idempotency key was already used for a different file")
             return existing.id
+        except Exception:
+            db.rollback()
+            document_assets.delete_document_assets(user_id, job_id)
+            if isinstance(pages, dict) and pages.get("source_file_ref"):
+                document_assets.delete_source_upload(user_id, pages["source_file_ref"])
+            raise
         return job.id
 
 
@@ -76,8 +95,10 @@ def claim(owner):
             return None
         if job.attempts >= MAX_ATTEMPTS:
             job.status, job.error, job.extraction_status = "failed", "RetryLimitExceeded", "failed"
+            user_id, job_id = job.user_id, job.id
             job.pages, job.lease_owner, job.lease_expires_at = None, None, None
             db.commit()
+            _cleanup_upload(user_id, job_id)
             return None
         job.status, job.lease_owner = "processing", owner
         job.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
@@ -104,6 +125,8 @@ def progress(job_id, owner, **values):
             job.pages, job.lease_owner, job.lease_expires_at = None, None, None
             job.expires_at = datetime.now(UTC) + timedelta(seconds=settings.job_retention_seconds)
         db.commit()
+        if job.status in TERMINAL:
+            _cleanup_upload(job.user_id, job.id)
 
 
 def heartbeat(job_id, owner):
@@ -117,12 +140,17 @@ def retry(job_id, owner, error):
     with SessionLocal() as db:
         job = lock_owned(db, job_id, owner)
         job.error = type(error).__name__
-        job.status = "failed" if job.attempts >= MAX_ATTEMPTS else "retrying"
+        from fastapi import HTTPException
+        permanent = isinstance(error, ValueError) or (
+            isinstance(error, HTTPException) and 400 <= error.status_code < 500)
+        job.status = "failed" if permanent or job.attempts >= MAX_ATTEMPTS else "retrying"
         job.next_attempt_at = datetime.now(UTC) + timedelta(seconds=5 * job.attempts)
         job.lease_owner, job.lease_expires_at = None, None
         if job.status == "failed":
             job.pages, job.extraction_status = None, "failed"
         db.commit()
+        if job.status == "failed":
+            _cleanup_upload(job.user_id, job.id)
 
 
 def cleanup():
@@ -132,7 +160,12 @@ def cleanup():
                                               IngestionJob.expires_at <= now))
         db.execute(update(IngestionJob).where(IngestionJob.idempotency_expires_at <= now)
                    .values(idempotency_key=None))
+        active_pages = db.execute(select(IngestionJob.pages).where(
+            IngestionJob.status.in_(("queued", "processing", "retrying")))).scalars().all()
         db.commit()
+    active_refs = {item.get("source_file_ref") for item in active_pages
+                   if isinstance(item, dict) and item.get("source_file_ref")}
+    document_assets.cleanup_orphan_source_uploads(active_refs)
 
 
 def mark_deleted(db, job_id, user_id):

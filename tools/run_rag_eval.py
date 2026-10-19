@@ -46,6 +46,20 @@ def recall_hit(question, results):
     return str(expected in passages).lower()
 
 
+def expected_source_rank(question, results, documents_by_id):
+    expected_id = question.get("document_id")
+    expected_filename = documents_by_id.get(expected_id, {}).get("filename")
+    if not expected_filename:
+        return ""
+    target = Path(expected_filename).stem.casefold()
+    for rank, item in enumerate(results, start=1):
+        actual = re.sub(r"_chunk_\d+$", "", Path(item.get("filename", "")).stem,
+                        flags=re.IGNORECASE).casefold()
+        if actual == target:
+            return rank
+    return ""
+
+
 def summarize(rows):
     metrics = {}
     for endpoint in ("search", "agent"):
@@ -63,6 +77,17 @@ def summarize(rows):
         "answerable_questions": len(search_rows),
         "rate": round(sum(r["retrieval_hit"] == "true" for r in search_rows) / len(search_rows), 4) if search_rows else None,
     }
+    ranked = [r for r in rows if r["endpoint"] == "search" and r["answerable"] == "true"
+              and r.get("expected_filename")]
+    ranks = [int(r["source_rank_at_5"]) if r.get("source_rank_at_5") else 0 for r in ranked]
+    metrics["expected_source_recall_at_5"] = {
+        "hits": sum(rank > 0 for rank in ranks), "questions": len(ranks),
+        "rate": round(sum(rank > 0 for rank in ranks) / len(ranks), 4) if ranks else None,
+    }
+    metrics["expected_source_mrr_at_5"] = {
+        "questions": len(ranks),
+        "rate": round(sum(1 / rank for rank in ranks if rank) / len(ranks), 4) if ranks else None,
+    }
     agent_rows = [r for r in rows if r["endpoint"].strip("/") in {"agent", "chat/agent"}]
     for field in MANUAL_FIELDS:
         eligible = [r for r in agent_rows if field != "privacy_safe" or r.get("privacy_test", "").lower() == "true"]
@@ -71,6 +96,13 @@ def summarize(rows):
         partial = labels.count("partial")
         metrics[field] = {"yes": graded.count("yes"), "partial": partial,
                           "no": graded.count("no"), "ungraded": len(eligible)-len(graded)-partial}
+    multimodal = [r for r in agent_rows if r.get("multimodal_test", "").lower() == "true"]
+    multimodal_labels = [r.get("answer_correct", "").strip().lower() for r in multimodal]
+    metrics["multimodal_agent_answers"] = {
+        "questions": len(multimodal), "correct": multimodal_labels.count("yes"),
+        "partial": multimodal_labels.count("partial"), "incorrect": multimodal_labels.count("no"),
+        "ungraded": len(multimodal) - sum(label in {"yes", "partial", "no"} for label in multimodal_labels),
+    }
     metrics["note"] = "Small synthetic demo benchmark. Manual judgments are not inferred by the script."
     return metrics
 
@@ -91,6 +123,7 @@ def main():
         if not 1 <= args.repeats <= 20:
             parser.error("--repeats must be between 1 and 20")
         corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
+        documents_by_id = {item["id"]: item for item in corpus.get("documents", [])}
         headers = {"Authorization": f"Bearer {args.token}"}
         rows = []
         with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers, timeout=120) as client:
@@ -114,9 +147,11 @@ def main():
                             if endpoint == "search":
                                 results = body if isinstance(body, list) else []
                                 retrieval_hit = recall_hit(question, results)
+                                source_rank = expected_source_rank(question, results, documents_by_id)
                             else:
                                 results = []
                                 retrieval_hit = ""
+                                source_rank = ""
                                 conversation_id = body.get("conversation_id") if isinstance(body, dict) else None
                                 if endpoint == "chat/agent" and group and conversation_id:
                                     conversations[group] = conversation_id
@@ -127,11 +162,14 @@ def main():
                                 "repeat": repeat, "question_id": question["id"], "endpoint": endpoint,
                                 "answerable": str(question["answerable"]).lower(),
                                 "privacy_test": str(question.get("privacy_test", False)).lower(),
+                                "multimodal_test": str(question.get("multimodal_test", False)).lower(),
                                 "expected_document": question.get("document_id") or "",
+                                "expected_filename": documents_by_id.get(question.get("document_id"), {}).get("filename", ""),
                                 "expected_facts": json.dumps(question.get("expected_facts", []), ensure_ascii=False),
                                 "evidence_quote": question.get("evidence_quote") or "",
                                 "http_status": str(response.status_code), "latency_ms": elapsed,
                                 "retrieval_hit": retrieval_hit,
+                                "source_rank_at_5": source_rank,
                                 "cited_document_ids": json.dumps(cited),
                                 "conversation_id": conversation_id or "",
                                 "response": json.dumps(body, ensure_ascii=False),
@@ -143,11 +181,13 @@ def main():
                                 "repeat": repeat, "question_id": question["id"], "endpoint": endpoint,
                                 "answerable": str(question["answerable"]).lower(),
                                 "privacy_test": str(question.get("privacy_test", False)).lower(),
+                                "multimodal_test": str(question.get("multimodal_test", False)).lower(),
                                 "expected_document": question.get("document_id") or "",
+                                "expected_filename": documents_by_id.get(question.get("document_id"), {}).get("filename", ""),
                                 "expected_facts": json.dumps(question.get("expected_facts", []), ensure_ascii=False),
                                 "evidence_quote": question.get("evidence_quote") or "",
                                 "http_status": "ERROR", "latency_ms": elapsed,
-                                "retrieval_hit": "", "cited_document_ids": "[]", "conversation_id": "",
+                                "retrieval_hit": "", "source_rank_at_5": "", "cited_document_ids": "[]", "conversation_id": "",
                                 "response": type(error).__name__, **{field: "" for field in MANUAL_FIELDS}})
                     print(f"repeat {repeat}: {question['id']} done", flush=True)
         RESULTS.parent.mkdir(parents=True, exist_ok=True)

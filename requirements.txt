@@ -8,6 +8,7 @@ alembic==1.20.0
 psycopg2-binary==2.9.12
 pgvector==0.5.0
 pypdf==5.9.0
+PyMuPDF==1.26.7
 redis==7.4.1
 openai==3.6.0
 tenacity==9.1.4

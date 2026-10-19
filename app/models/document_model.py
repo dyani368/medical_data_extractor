@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime,timedelta, UTC
-from sqlalchemy import ForeignKey, DateTime, Integer, String
+from sqlalchemy import ForeignKey, DateTime, Integer, String, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from typing import List
@@ -18,6 +18,9 @@ class Document(Base):
     source_document_id: Mapped[str | None] = mapped_column(String(36), index=True)
     chunk_index: Mapped[int | None] = mapped_column(Integer)
     page_number: Mapped[int | None] = mapped_column(Integer)
+    element_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
+    section_title: Mapped[str | None] = mapped_column(String(300))
+    visual_assets: Mapped[list | None] = mapped_column(JSON)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
 
