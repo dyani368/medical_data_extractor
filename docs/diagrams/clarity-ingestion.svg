@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 500" role="img" aria-labelledby="title desc">
+  <title id="title">Clarity upload and ingestion flow</title>
+  <desc id="desc">The API validates and stages an upload, creates a PostgreSQL job and returns HTTP 202. A separate worker claims the job, parses and redacts the file, indexes passages, then records a terminal status. The browser polls the job and opens the document.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#acc1d8"/></marker>
+    <style>.bg{fill:#22272f}.api{fill:#12375a;stroke:#42698a;stroke-width:1.5}.worker{fill:#204b48;stroke:#5b8c82;stroke-width:1.5}.status{fill:#293343;stroke:#6a829e;stroke-width:1.5}.line{fill:none;stroke:#acc1d8;stroke-width:2.5;marker-end:url(#arrow)}.dash{fill:none;stroke:#94acc4;stroke-width:2;stroke-dasharray:7 6;marker-end:url(#arrow)}.title{fill:#f3f7fc;font:500 28px Arial,sans-serif}.head{fill:#eaf2fd;font:500 20px Arial,sans-serif}.sub{fill:#bdcadd;font:16px Arial,sans-serif}.tag{fill:#d4e5fb;font:500 16px Arial,sans-serif}</style>
+  </defs>
+  <rect class="bg" width="1240" height="500" rx="20"/>
+  <text class="title" x="40" y="48">Upload: accepted first, processed later</text>
+  <text class="sub" x="40" y="76">The blue steps are API work. The green steps are done by the separate persistent worker.</text>
+  <rect class="api" x="42" y="136" width="242" height="112" rx="14"/>
+  <text class="tag" x="62" y="163">1 · API</text><text class="head" x="163" y="196" text-anchor="middle">Validate and stage</text><text class="sub" x="163" y="224" text-anchor="middle">auth · file type · size</text>
+  <rect class="api" x="348" y="136" width="242" height="112" rx="14"/>
+  <text class="tag" x="368" y="163">2 · API</text><text class="head" x="469" y="196" text-anchor="middle">Create job row</text><text class="sub" x="469" y="224" text-anchor="middle">PostgreSQL + replay key</text>
+  <rect class="status" x="652" y="118" width="250" height="130" rx="14"/>
+  <text class="tag" x="672" y="147">Immediate response</text><text class="head" x="777" y="187" text-anchor="middle">HTTP 202 + job ID</text><text class="sub" x="777" y="218" text-anchor="middle">not an indexed document yet</text>
+  <path class="line" d="M284 192 H338"/><path class="line" d="M590 192 H642"/>
+
+  <rect class="worker" x="42" y="312" width="242" height="116" rx="14"/>
+  <text class="tag" x="62" y="340">3 · WORKER</text><text class="head" x="163" y="375" text-anchor="middle">Claim with lease</text><text class="sub" x="163" y="402" text-anchor="middle">recover after a crash</text>
+  <rect class="worker" x="348" y="312" width="242" height="116" rx="14"/>
+  <text class="tag" x="368" y="340">4 · WORKER</text><text class="head" x="469" y="375" text-anchor="middle">Parse and redact</text><text class="sub" x="469" y="402" text-anchor="middle">text · tables · figures</text>
+  <rect class="worker" x="654" y="312" width="242" height="116" rx="14"/>
+  <text class="tag" x="674" y="340">5 · WORKER</text><text class="head" x="775" y="375" text-anchor="middle">Embed and store</text><text class="sub" x="775" y="402" text-anchor="middle">passages + extraction</text>
+  <rect class="status" x="962" y="312" width="236" height="116" rx="14"/>
+  <text class="tag" x="982" y="340">6 · STATUS</text><text class="head" x="1080" y="375" text-anchor="middle">Ready or failed</text><text class="sub" x="1080" y="402" text-anchor="middle">browser polls and reviews</text>
+  <path class="dash" d="M777 248 V276 H163 V302"/>
+  <path class="line" d="M284 370 H338"/><path class="line" d="M590 370 H644"/><path class="line" d="M896 370 H952"/>
+  <text class="sub" x="932" y="175">The worker can start later;</text><text class="sub" x="932" y="201">202 is not success.</text>
+</svg>

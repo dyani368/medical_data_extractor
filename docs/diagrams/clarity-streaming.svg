@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 430" role="img" aria-labelledby="title desc">
+  <title id="title">Clarity streaming timeline</title>
+  <desc id="desc">After the browser posts a chat question, the API and model spend time retrieving evidence with tools. Only then does the final answer stream as SSE text fragments, followed by sources and a complete event.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#acc1d8"/></marker>
+    <style>.bg{fill:#22272f}.phase{fill:#12375a;stroke:#42698a;stroke-width:1.5}.wait{fill:#293343;stroke:#6a829e;stroke-width:1.5}.send{fill:#204b48;stroke:#5b8c82;stroke-width:1.5}.line{fill:none;stroke:#acc1d8;stroke-width:2.5;marker-end:url(#arrow)}.title{fill:#f3f7fc;font:500 28px Arial,sans-serif}.head{fill:#eaf2fd;font:500 19px Arial,sans-serif}.sub{fill:#bdcadd;font:16px Arial,sans-serif}.tag{fill:#d4e5fb;font:500 16px Arial,sans-serif}</style>
+  </defs>
+  <rect class="bg" width="1240" height="430" rx="20"/>
+  <text class="title" x="40" y="48">Why the first token can still take time</text>
+  <text class="sub" x="40" y="76">SSE starts with the request, but answer text is generated only after evidence gathering.</text>
+  <path class="line" d="M48 135 H1186"/><text class="tag" x="48" y="122">REQUEST START</text><text class="tag" x="1030" y="122">TIME →</text>
+
+  <rect class="phase" x="48" y="166" width="196" height="100" rx="14"/>
+  <text class="head" x="146" y="205" text-anchor="middle">Browser sends</text><text class="sub" x="146" y="235" text-anchor="middle">POST + JWT + query</text>
+  <rect class="wait" x="274" y="166" width="260" height="100" rx="14"/>
+  <text class="head" x="404" y="205" text-anchor="middle">Agent chooses tools</text><text class="sub" x="404" y="235" text-anchor="middle">model call + owned lookups</text>
+  <rect class="wait" x="564" y="166" width="210" height="100" rx="14"/>
+  <text class="head" x="669" y="205" text-anchor="middle">Evidence returns</text><text class="sub" x="669" y="235" text-anchor="middle">answer not ready yet</text>
+  <rect class="send" x="804" y="166" width="198" height="100" rx="14"/>
+  <text class="head" x="903" y="205" text-anchor="middle">Text fragments</text><text class="sub" x="903" y="235" text-anchor="middle">SSE data events</text>
+  <rect class="send" x="1032" y="166" width="164" height="100" rx="14"/>
+  <text class="head" x="1114" y="205" text-anchor="middle">Finish</text><text class="sub" x="1114" y="235" text-anchor="middle">sources · complete</text>
+  <path class="line" d="M244 216 H264"/><path class="line" d="M534 216 H554"/><path class="line" d="M774 216 H794"/><path class="line" d="M1002 216 H1022"/>
+  <text class="tag" x="524" y="327" text-anchor="middle">Tool calling: chooses and retrieves evidence</text>
+  <text class="tag" x="1002" y="327" text-anchor="middle">SSE: delivers the final answer</text>
+  <text class="sub" x="48" y="383">A dropped stream may show partial text; the browser should wait for the complete event.</text>
+</svg>

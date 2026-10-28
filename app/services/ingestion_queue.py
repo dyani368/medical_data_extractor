@@ -1,18 +1,31 @@
 """Small PostgreSQL queue: atomic claims, leases, bounded retries, and retention."""
 from datetime import datetime, timedelta, UTC
 import hashlib
+import logging
 import uuid
-from sqlalchemy import select, or_, and_, delete, update
+from sqlalchemy import select, or_, and_, delete, update, func
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models.ingestion_job_model import IngestionJob
 from app.services import document_assets
+from app.core.redis_client import get_redis
 
 MAX_ATTEMPTS = 3
 LEASE_SECONDS = 90
 TERMINAL = ("completed", "completed_with_errors", "failed", "deleted")
+WAKE_KEY = "ingestion:work"
+log = logging.getLogger(__name__)
+
+
+def _notify_worker():
+    try:
+        get_redis().lpush(WAKE_KEY, "ready")
+    except Exception as exc:
+        # The job is already durable in Postgres. The worker's recovery scan
+        # will find it even if Redis is temporarily unavailable.
+        log.warning("Could not wake ingestion worker: %s", type(exc).__name__)
 
 
 class LeaseLost(Exception):
@@ -40,6 +53,7 @@ def enqueue(pages, filename, user_id, key, content, source_document_id=None):
                     document_assets.delete_source_upload(user_id, pages["source_file_ref"])
                 if existing.content_digest != digest:
                     raise HTTPException(409, "This idempotency key was already used for a different file")
+                _notify_worker()
                 return existing.id
         job_id = source_document_id or str(uuid.uuid4())
         stored_pages = (pages if isinstance(pages, dict) and pages.get("source_file_ref")
@@ -64,6 +78,7 @@ def enqueue(pages, filename, user_id, key, content, source_document_id=None):
                 raise
             if existing.content_digest != digest:
                 raise HTTPException(409, "This idempotency key was already used for a different file")
+            _notify_worker()
             return existing.id
         except Exception:
             db.rollback()
@@ -71,7 +86,22 @@ def enqueue(pages, filename, user_id, key, content, source_document_id=None):
             if isinstance(pages, dict) and pages.get("source_file_ref"):
                 document_assets.delete_source_upload(user_id, pages["source_file_ref"])
             raise
+        _notify_worker()
         return job.id
+
+
+def next_due_delay():
+    """Seconds until a retry or expired lease can be claimed, if one exists."""
+    with SessionLocal() as db:
+        retry_at = db.scalar(select(func.min(IngestionJob.next_attempt_at)).where(
+            IngestionJob.status == "retrying"))
+        lease_at = db.scalar(select(func.min(IngestionJob.lease_expires_at)).where(
+            IngestionJob.status == "processing"))
+    due_dates = [value.replace(tzinfo=UTC) if value.tzinfo is None else value
+                 for value in (retry_at, lease_at) if value is not None]
+    if not due_dates:
+        return None
+    return max(0.0, (min(due_dates) - datetime.now(UTC)).total_seconds())
 
 
 def get_status(job_id, user_id):

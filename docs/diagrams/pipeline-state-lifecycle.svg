@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 380" width="100%" height="100%">
+  <defs>
+    <linearGradient id="queuedCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="procCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#075985" />
+    </linearGradient>
+    <linearGradient id="compCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <linearGradient id="warnCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="failCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#b91c1c" />
+    </linearGradient>
+    <linearGradient id="retryCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#6d28d9" />
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#94a3b8" />
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#ef4444" />
+    </marker>
+    <marker id="arrPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#c084fc" />
+    </marker>
+  </defs>
+
+  <rect width="1100" height="380" rx="16" fill="#090d16" stroke="#1e293b" stroke-width="2"/>
+  
+  <text x="40" y="44" fill="#f8fafc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700">Ingestion Job State Lifecycle</text>
+  <text x="40" y="70" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">States tracked in PostgreSQL ingestion_jobs table</text>
+
+  <!-- Node: QUEUED -->
+  <rect x="50" y="140" width="130" height="60" rx="10" fill="url(#queuedCard)" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="115" y="166" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle">queued</text>
+  <text x="115" y="185" fill="#dbeafe" font-family="sans-serif" font-size="11" text-anchor="middle">FastAPI POST</text>
+
+  <!-- Arrow Queued -> Processing -->
+  <path d="M 180 170 L 268 170" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="224" y="162" fill="#94a3b8" font-family="sans-serif" font-size="10" text-anchor="middle">claimed</text>
+
+  <!-- Node: PROCESSING -->
+  <rect x="270" y="130" width="170" height="80" rx="10" fill="url(#procCard)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="355" y="158" fill="#ffffff" font-family="sans-serif" font-size="15" font-weight="700" text-anchor="middle">processing</text>
+  <text x="355" y="178" fill="#bae6fd" font-family="sans-serif" font-size="11" text-anchor="middle">Hold 90s Lease</text>
+  <text x="355" y="196" fill="#bae6fd" font-family="sans-serif" font-size="10" text-anchor="middle">10s Heartbeat Thread</text>
+
+  <!-- Arrow Processing -> Completed -->
+  <path d="M 440 150 L 598 115" stroke="#10b981" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="505" y="125" fill="#34d399" font-family="sans-serif" font-size="11" text-anchor="middle">All chunks OK</text>
+
+  <!-- Node: COMPLETED -->
+  <rect x="600" y="85" width="230" height="60" rx="10" fill="url(#compCard)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="715" y="111" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle">completed</text>
+  <text x="715" y="131" fill="#d1fae5" font-family="sans-serif" font-size="11" text-anchor="middle">Terminal (100% Ready)</text>
+
+  <!-- Arrow Processing -> Completed With Errors -->
+  <path d="M 440 170 L 598 170" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="515" y="165" fill="#fbbf24" font-family="sans-serif" font-size="11" text-anchor="middle">≥1 LLM failed</text>
+
+  <!-- Node: COMPLETED_WITH_ERRORS -->
+  <rect x="600" y="155" width="230" height="60" rx="10" fill="url(#warnCard)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="715" y="180" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle">completed_with_errors</text>
+  <text x="715" y="200" fill="#fef3c7" font-family="sans-serif" font-size="11" text-anchor="middle">Terminal (Searchable with warnings)</text>
+
+  <!-- Arrow Processing -> Retrying -->
+  <path d="M 330 210 L 330 270" stroke="#c084fc" stroke-width="2" marker-end="url(#arrPurple)"/>
+  <text x="240" y="250" fill="#c084fc" font-family="sans-serif" font-size="11">Crash / Lease Expired</text>
+
+  <!-- Node: RETRYING -->
+  <rect x="260" y="272" width="140" height="55" rx="10" fill="url(#retryCard)" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="330" y="296" fill="#ffffff" font-family="sans-serif" font-size="13" font-weight="700" text-anchor="middle">retrying</text>
+  <text x="330" y="315" fill="#f3e8ff" font-family="sans-serif" font-size="11" text-anchor="middle">Attempts &lt; 3</text>
+
+  <!-- Arrow Retrying back to Processing -->
+  <path d="M 400 295 Q 460 295 440 215" stroke="#c084fc" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arrPurple)"/>
+  <text x="475" y="275" fill="#c084fc" font-family="sans-serif" font-size="11">Backoff: 5s × attempt</text>
+
+  <!-- Arrow Processing -> Failed -->
+  <path d="M 440 190 L 598 250" stroke="#ef4444" stroke-width="2" marker-end="url(#arrRed)"/>
+  <text x="500" y="235" fill="#f87171" font-family="sans-serif" font-size="11" text-anchor="middle">Attempts ≥ 3 or Bad PDF</text>
+
+  <!-- Node: FAILED -->
+  <rect x="600" y="225" width="230" height="60" rx="10" fill="url(#failCard)" stroke="#f87171" stroke-width="1.5"/>
+  <text x="715" y="250" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle">failed</text>
+  <text x="715" y="270" fill="#fee2e2" font-family="sans-serif" font-size="11" text-anchor="middle">Terminal (Corrupt PDF or Exceeded 3 tries)</text>
+
+  <!-- Node: DELETED -->
+  <rect x="910" y="155" width="130" height="60" rx="10" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="975" y="180" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle">deleted</text>
+  <text x="975" y="200" fill="#94a3b8" font-family="sans-serif" font-size="11" text-anchor="middle">User removes doc</text>
+
+  <path d="M 830 185 L 900 185" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arr)"/>
+</svg>

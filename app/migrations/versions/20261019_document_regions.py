@@ -9,7 +9,9 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("documents", sa.Column("bbox", sa.JSON(), nullable=True))
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("documents")}
+    if "bbox" not in columns:
+        op.add_column("documents", sa.Column("bbox", sa.JSON(), nullable=True))
 
 
 def downgrade():

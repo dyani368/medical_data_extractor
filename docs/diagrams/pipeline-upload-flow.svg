@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 480" width="100%" height="100%">
+  <defs>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="blueCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#172554" />
+    </linearGradient>
+    <linearGradient id="emeraldCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#065f46" />
+      <stop offset="100%" stop-color="#022c22" />
+    </linearGradient>
+    <linearGradient id="amberCard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#854d0e" />
+      <stop offset="100%" stop-color="#451a03" />
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+    </marker>
+    <marker id="greenArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399" />
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1100" height="480" rx="16" fill="#090d16" stroke="#1e293b" stroke-width="2"/>
+  
+  <text x="40" y="44" fill="#f8fafc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700">Client Upload &amp; Async Job Queueing</text>
+  <text x="40" y="70" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">Why 202 Accepted returns immediately while processing happens safely out-of-band</text>
+
+  <!-- Lifeline Headers -->
+  <!-- 1. Browser -->
+  <rect x="50" y="100" width="160" height="46" rx="8" fill="url(#cardGrad)" stroke="#38bdf8" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="130" y="128" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">🖥️ Browser (UI)</text>
+
+  <!-- 2. FastAPI -->
+  <rect x="290" y="100" width="160" height="46" rx="8" fill="url(#blueCard)" stroke="#60a5fa" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="370" y="128" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">⚡ FastAPI (API)</text>
+
+  <!-- 3. Local Disk -->
+  <rect x="530" y="100" width="160" height="46" rx="8" fill="url(#amberCard)" stroke="#facc15" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="610" y="128" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">💾 Disk (.upload)</text>
+
+  <!-- 4. PostgreSQL -->
+  <rect x="770" y="100" width="180" height="46" rx="8" fill="url(#emeraldCard)" stroke="#34d399" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="860" y="128" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">🐘 PostgreSQL (DB)</text>
+
+  <!-- Lifeline Dashed Tracks -->
+  <line x1="130" y1="146" x2="130" y2="440" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+  <line x1="370" y1="146" x2="370" y2="440" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+  <line x1="610" y1="146" x2="610" y2="440" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+  <line x1="860" y1="146" x2="860" y2="440" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+
+  <!-- Message 1: POST /upload -->
+  <path d="M 130 180 L 362 180" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="160" y="160" width="180" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="250" y="175" fill="#38bdf8" font-family="monospace" font-size="11" text-anchor="middle">1. POST /upload (file.pdf)</text>
+
+  <!-- Message 2: Validate & Write Staging -->
+  <path d="M 370 220 L 602 220" stroke="#facc15" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="400" y="200" width="180" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="490" y="215" fill="#facc15" font-family="monospace" font-size="11" text-anchor="middle">2. Save {doc_id}.upload</text>
+
+  <!-- Message 3: Insert DB Job -->
+  <path d="M 370 265 L 852 265" stroke="#34d399" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="520" y="245" width="220" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="630" y="260" fill="#34d399" font-family="monospace" font-size="11" text-anchor="middle">3. INSERT job (status='queued')</text>
+
+  <!-- Message 4: HTTP 202 Accepted -->
+  <path d="M 370 310 L 138 310" stroke="#38bdf8" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <rect x="165" y="292" width="170" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="250" y="307" fill="#38bdf8" font-family="monospace" font-size="11" text-anchor="middle">4. HTTP 202 {job_id: "..."}</text>
+
+  <!-- Message 5: Polling GET /jobs -->
+  <path d="M 130 375 L 362 375" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="165" y="358" width="170" height="20" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="250" y="372" fill="#94a3b8" font-family="monospace" font-size="11" text-anchor="middle">5. GET /jobs/{job_id}</text>
+
+  <path d="M 370 390 L 852 390" stroke="#34d399" stroke-width="1.5" marker-end="url(#greenArrow)"/>
+  <path d="M 860 410 L 378 410" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#greenArrow)"/>
+  <text x="630" y="405" fill="#34d399" font-family="monospace" font-size="11" text-anchor="middle">Query Job Progress ("25%", "50%")</text>
+
+  <path d="M 370 425 L 138 425" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <text x="250" y="420" fill="#94a3b8" font-family="monospace" font-size="11" text-anchor="middle">Return Progress Payload</text>
+</svg>

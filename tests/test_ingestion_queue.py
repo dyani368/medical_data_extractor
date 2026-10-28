@@ -16,6 +16,7 @@ def db_factory(monkeypatch):
     IngestionJob.__table__.create(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(queue, "SessionLocal", factory)
+    monkeypatch.setattr(queue, "_notify_worker", lambda: None)
     yield factory
     engine.dispose()
 
@@ -88,3 +89,24 @@ def test_failed_attempt_requeues_and_retention_does_not_delete_active_work(db_fa
     queue.cleanup()
     with db_factory() as db:
         assert db.get(IngestionJob, job_id) is None
+
+
+def test_worker_can_schedule_next_retry_without_constant_database_polling(db_factory):
+    assert queue.next_due_delay() is None
+    job_id = enqueue()
+    queue.claim("worker")
+    queue.retry(job_id, "worker", RuntimeError())
+    delay = queue.next_due_delay()
+    assert delay is not None and 0 < delay <= 5
+
+
+def test_enqueue_wakes_worker_after_job_is_committed(db_factory, monkeypatch):
+    observed = []
+
+    def wake():
+        with db_factory() as db:
+            observed.append(db.scalar(select(IngestionJob.id)) is not None)
+
+    monkeypatch.setattr(queue, "_notify_worker", wake)
+    enqueue()
+    assert observed == [True]

@@ -124,7 +124,7 @@ async def upload_document(
     current_user: Annotated[user_model.User, Depends(get_current_user)],
     file: UploadFile = File(...),
     idempotency_key: str = Header(None)
-):
+):  
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File is too large")

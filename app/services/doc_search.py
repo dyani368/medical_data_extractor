@@ -14,7 +14,6 @@ def fuse_rankings(vector_docs, keyword_docs, limit):
     ordered = sorted(scores, key=lambda doc_id: (-scores[doc_id], doc_id))
     return [documents[doc_id] for doc_id in ordered[:limit]]
 
-
 def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, threshold: float | None = None):
     """Return ranked candidates, not a claim that they contain the answer.
 

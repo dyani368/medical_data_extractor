@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 440" width="100%" height="100%">
+  <defs>
+    <linearGradient id="workerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#064e3b" />
+    </linearGradient>
+    <linearGradient id="dbGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <marker id="greenArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399" />
+    </marker>
+    <marker id="amberArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
+    </marker>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1100" height="440" rx="16" fill="#090d16" stroke="#1e293b" stroke-width="2"/>
+  
+  <text x="40" y="44" fill="#f8fafc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700">Worker Claiming, 90s Leases &amp; 10s Heartbeats</text>
+  <text x="40" y="70" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">Preventing race conditions and recovering abandoned jobs automatically</text>
+
+  <!-- Lifeline Headers -->
+  <rect x="180" y="96" width="220" height="46" rx="8" fill="url(#workerGrad)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="290" y="124" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">⚙️ Worker Process</text>
+
+  <rect x="700" y="96" width="220" height="46" rx="8" fill="url(#dbGrad)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="810" y="124" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle">🐘 PostgreSQL (Queue Table)</text>
+
+  <!-- Dashed Lifelines -->
+  <line x1="290" y1="142" x2="290" y2="400" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+  <line x1="810" y1="142" x2="810" y2="400" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4" />
+
+  <!-- Action 1: SELECT FOR UPDATE SKIP LOCKED -->
+  <path d="M 290 170 L 802 170" stroke="#38bdf8" stroke-width="2" marker-end="url(#greenArrow)"/>
+  <rect x="375" y="152" width="350" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="550" y="167" fill="#38bdf8" font-family="monospace" font-size="11" text-anchor="middle">SELECT ... FOR UPDATE SKIP LOCKED</text>
+
+  <!-- Action 2: Row Locked & Lease Granted -->
+  <path d="M 810 205 L 298 205" stroke="#34d399" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#greenArrow)"/>
+  <rect x="420" y="188" width="260" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="550" y="203" fill="#34d399" font-family="monospace" font-size="11" text-anchor="middle">Row returned (Job #123 claimed)</text>
+
+  <!-- Action 3: Set Lease Expiry -->
+  <path d="M 290 240 L 802 240" stroke="#34d399" stroke-width="2" marker-end="url(#greenArrow)"/>
+  <rect x="360" y="222" width="380" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="550" y="237" fill="#34d399" font-family="monospace" font-size="11" text-anchor="middle">UPDATE status='processing', lease_expires=NOW()+90s</text>
+
+  <!-- Action 4: Background Thread Loop (Heartbeat) -->
+  <rect x="230" y="275" width="640" height="100" rx="8" fill="#131c2e" stroke="#2563eb" stroke-dasharray="6 4"/>
+  <text x="245" y="295" fill="#60a5fa" font-family="sans-serif" font-size="12" font-weight="600">PARALLEL THREAD: Worker Heartbeat Loop (Runs every 10 seconds)</text>
+
+  <path d="M 290 330 L 802 330" stroke="#fbbf24" stroke-width="2" marker-end="url(#amberArrow)"/>
+  <rect x="400" y="318" width="300" height="22" rx="4" fill="#0f172a" stroke="#1e293b"/>
+  <text x="550" y="333" fill="#fbbf24" font-family="monospace" font-size="11" text-anchor="middle">UPDATE lease_expires_at = NOW() + 90s</text>
+  <text x="550" y="360" fill="#94a3b8" font-family="sans-serif" font-size="11" text-anchor="middle">💡 If worker process dies, heartbeat stops. After 90s, another worker reclaims it!</text>
+</svg>

@@ -3,6 +3,7 @@ import asyncio
 import logging
 import signal
 import threading
+import time
 import uuid
 import secrets
 from fastapi import FastAPI, Header, HTTPException
@@ -16,7 +17,6 @@ from app.providers.openai_provider import OpenAIProvider
 
 log = logging.getLogger(__name__)
 
-
 def run_worker(stopping=None):
     if stopping is None:
         stopping = threading.Event()
@@ -26,17 +26,27 @@ def run_worker(stopping=None):
     # Reuse one loop: AsyncOpenAI's connection pool must not cross closed loops.
     loop = asyncio.new_event_loop()
     redis = get_redis()
-    ticks = 0
+    next_scan = 0.0
+    next_cleanup = 0.0
     while not stopping.is_set():
         try:
             redis.setex("worker:heartbeat", 60, "alive")
-            if ticks % 300 == 0:
+            now = time.monotonic()
+            if now >= next_cleanup:
                 queue.cleanup()
-            ticks += 1
+                next_cleanup = now + 3600
+            should_scan = now >= next_scan
+            if not should_scan:
+                # Redis wakes the worker for new jobs. A short blocking wait
+                # still lets us refresh the heartbeat and handle shutdown.
+                should_scan = bool(redis.blpop(queue.WAKE_KEY, timeout=15))
+            if not should_scan:
+                continue
             owner = str(uuid.uuid4())
             job = queue.claim(owner)
             if job is None:
-                stopping.wait(1)
+                delay = queue.next_due_delay()
+                next_scan = time.monotonic() + min(600.0, max(1.0, delay)) if delay is not None else time.monotonic() + 600
                 continue
             finished = threading.Event()
 
@@ -68,9 +78,12 @@ def run_worker(stopping=None):
             finally:
                 finished.set()
                 heartbeat.join(timeout=2)
+                # Drain any queued work before sleeping again.
+                next_scan = 0.0
         except Exception as exc:
             log.warning("Queue unavailable: %s", type(exc).__name__)
             stopping.wait(3)
+            next_scan = 0.0
     loop.close()
 
 

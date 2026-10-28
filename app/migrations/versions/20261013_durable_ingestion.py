@@ -9,6 +9,8 @@ depends_on = None
 
 
 def upgrade():
+    if sa.inspect(op.get_bind()).has_table("ingestion_jobs"):
+        return
     op.create_table("ingestion_jobs",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 420" width="100%" height="100%">
+  <defs>
+    <linearGradient id="pdfGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b91c1c" />
+      <stop offset="100%" stop-color="#7f1d1d" />
+    </linearGradient>
+    <linearGradient id="parserGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0369a1" />
+      <stop offset="100%" stop-color="#075985" />
+    </linearGradient>
+    <linearGradient id="elemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+    </marker>
+  </defs>
+
+  <rect width="1100" height="420" rx="16" fill="#090d16" stroke="#1e293b" stroke-width="2"/>
+  
+  <text x="40" y="44" fill="#f8fafc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700">PyMuPDF (fitz) Decomposition: Text, Tables &amp; Images</text>
+  <text x="40" y="70" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">How raw PDF content is partitioned without duplicate text or lost figures</text>
+
+  <!-- PDF Box -->
+  <rect x="40" y="150" width="150" height="110" rx="10" fill="url(#pdfGrad)" stroke="#f87171" stroke-width="1.5"/>
+  <text x="115" y="195" fill="#ffffff" font-family="sans-serif" font-size="16" font-weight="700" text-anchor="middle">📄 PDF Page</text>
+  <text x="115" y="220" fill="#fee2e2" font-family="sans-serif" font-size="12" text-anchor="middle">(Text, Grids, Figures)</text>
+
+  <!-- Arrow -->
+  <path d="M 190 205 L 258 205" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Parser Box -->
+  <rect x="260" y="130" width="220" height="150" rx="10" fill="url(#parserGrad)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="370" y="165" fill="#ffffff" font-family="sans-serif" font-size="15" font-weight="700" text-anchor="middle">PyMuPDF Engine</text>
+  <text x="370" y="195" fill="#bae6fd" font-family="sans-serif" font-size="12" text-anchor="middle">1. find_tables()</text>
+  <text x="370" y="220" fill="#bae6fd" font-family="sans-serif" font-size="12" text-anchor="middle">2. get_text("dict")</text>
+  <text x="370" y="245" fill="#bae6fd" font-family="sans-serif" font-size="12" text-anchor="middle">3. get_images() / drawings</text>
+
+  <!-- Arrows branching to 3 types -->
+  <path d="M 480 160 L 578 120" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M 480 205 L 578 205" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M 480 250 L 578 290" stroke="#38bdf8" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Output 1: Tables -->
+  <rect x="580" y="90" width="480" height="65" rx="8" fill="url(#elemGrad)" stroke="#10b981" stroke-width="1.5"/>
+  <text x="600" y="117" fill="#34d399" font-family="sans-serif" font-size="13" font-weight="700">📊 Markdown Tables (element_type = "table")</text>
+  <text x="600" y="138" fill="#94a3b8" font-family="sans-serif" font-size="11">Converts cell grids into Markdown. Bounding boxes are tracked so text is NOT duplicated.</text>
+
+  <!-- Output 2: Text -->
+  <rect x="580" y="175" width="480" height="65" rx="8" fill="url(#elemGrad)" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="600" y="202" fill="#60a5fa" font-family="sans-serif" font-size="13" font-weight="700">📝 Text Blocks (element_type = "text")</text>
+  <text x="600" y="223" fill="#94a3b8" font-family="sans-serif" font-size="11">Paragraphs filtered if overlapping ≥50% with table rects. Attached to nearest section title.</text>
+
+  <!-- Output 3: Images -->
+  <rect x="580" y="260" width="480" height="85" rx="8" fill="url(#elemGrad)" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="600" y="287" fill="#fbbf24" font-family="sans-serif" font-size="13" font-weight="700">🖼️ Image Files (element_type = "image")</text>
+  <text x="600" y="308" fill="#94a3b8" font-family="sans-serif" font-size="11">Saved to hard drive: data/document-assets/{user}/{doc}/visual-XXXX.png</text>
+  <text x="600" y="326" fill="#94a3b8" font-family="sans-serif" font-size="11">Captions/context stored in DB + LLM-generated description makes them searchable.</text>
+</svg>
