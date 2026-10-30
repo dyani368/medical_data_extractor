@@ -1,10 +1,22 @@
-import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react'
+import { Component, useEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, FileText, Grip, Loader2, X } from 'lucide-react'
 import { streamChat } from './api'
 import type { Source } from './types'
 
 type Entry = { role: 'user' | 'assistant'; text: string; sources?: Source[]; pending?: boolean }
+
+export class DocumentChatBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(error: Error) { console.error('Document chat failed', error) }
+  render() {
+    if (this.state.failed) return <div className="document-chat document-chat-fallback" role="alert">
+      <p>The document chat ran into an error.</p><button onClick={this.props.onClose}>Close chat</button>
+    </div>
+    return this.props.children
+  }
+}
 
 export default function DocumentChat({ documentId, filename, demo, onClose, onSignIn, onSource }: {
   documentId: string; filename: string; demo: boolean; onClose: () => void; onSignIn: () => void;
@@ -16,10 +28,13 @@ export default function DocumentChat({ documentId, filename, demo, onClose, onSi
   const [busy, setBusy] = useState(false)
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
   const panel = useRef<HTMLDivElement>(null)
-  const messagesEnd = useRef<HTMLDivElement>(null)
+  const messagesPanel = useRef<HTMLDivElement>(null)
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
-  useEffect(() => messagesEnd.current?.scrollIntoView({ block: 'end' }), [entries])
+  useEffect(() => {
+    const current = messagesPanel.current
+    if (current) current.scrollTop = current.scrollHeight
+  }, [entries])
 
   function startDrag(event: PointerEvent<HTMLElement>) {
     if ((event.target as HTMLElement).closest('button')) return
@@ -65,7 +80,7 @@ export default function DocumentChat({ documentId, filename, demo, onClose, onSi
       <div><Grip size={16} /><span><strong>Ask about this document</strong><small title={filename}>{filename}</small></span></div>
       <button aria-label="Close document chat" onClick={onClose}><X size={18} /></button>
     </header>
-    <div className="document-chat-messages">
+    <div ref={messagesPanel} className="document-chat-messages">
       {!entries.length && <div className="document-chat-empty"><FileText size={24} /><p>Questions here search only this document.</p>{demo && <p>Sign in to ask about your own files.</p>}</div>}
       {entries.map((entry, index) => <div key={index} className={`document-chat-entry ${entry.role}`}>
         {entry.role === 'user' ? <p>{entry.text}</p> : <><ReactMarkdown components={{ a: ({ href, children }) => {
@@ -75,7 +90,6 @@ export default function DocumentChat({ documentId, filename, demo, onClose, onSi
           {entry.pending && <Loader2 className="spin" size={15} />}
           {!!entry.sources?.length && <div className="document-chat-sources">{entry.sources.map(source => <button key={source.document_id} onClick={() => onSource(source.document_id)}>{source.filename}{source.page_number ? ` · p. ${source.page_number}` : ''}</button>)}</div>}</>}
       </div>)}
-      <div ref={messagesEnd} />
     </div>
     <form onSubmit={ask} className="document-chat-form">
       <input aria-label="Question about this document" placeholder="Ask about this document…" value={draft} onChange={event => setDraft(event.target.value)} />

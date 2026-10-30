@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, ArrowDownToLine, ArrowLeft, ChevronLeft, ChevronRight, FileText, Image, Loader2, Table2 } from 'lucide-react'
 import { requestBlob } from './api'
-import DocumentChat from './DocumentChat'
+import DocumentChat, { DocumentChatBoundary } from './DocumentChat'
 import type { Chunk, DocumentDetail, Extraction } from './types'
 
 type WorkspaceProps = {
@@ -186,7 +186,7 @@ export default function DocumentWorkspace({ document, extraction, loading, demo,
             return <article className={`evidence-block ${activeChunkId === chunk.id ? 'active' : ''}`} id={`evidence-${chunk.id}`} key={chunk.id} onMouseEnter={() => setActiveChunkId(chunk.id)} onFocus={() => setActiveChunkId(chunk.id)}>
               <div className="evidence-head"><span className={`evidence-kind ${chunk.element_type || 'text'}`}>{chunk.element_type === 'image' ? <Image size={15} /> : chunk.element_type === 'table' ? <Table2 size={15} /> : <FileText size={15} />}{elementLabel(chunk.element_type)}</span>{item?.status === 'failed' && <span className="finding-status failed">Review needed</span>}</div>
               <h3>{heading(chunk)}</h3>
-              {tab === 'findings' ? item?.status === 'failed' ? <p className="finding-error"><AlertCircle size={16} /> Extraction unavailable. See parsed content.</p> : item?.result ? <>{values.length > 0 && <dl className="finding-values">{values.map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{readable(value)}</dd></div>)}</dl>}{item.result.summary && item.result.summary.trim() !== chunk.content.trim() && !/^insufficient context\.?$/i.test(item.result.summary.trim()) && <p className="finding-summary">{item.result.summary}</p>}{!values.length && (!item.result.summary || /^insufficient context\.?$/i.test(item.result.summary.trim())) && <p>No useful findings extracted. Review parsed content.</p>}</> : <p>AI findings are not available for this part. See parsed content.</p>
+              {tab === 'findings' ? item?.status === 'failed' ? <p className="finding-error"><AlertCircle size={16} /> Extraction unavailable. See parsed content.</p> : item?.result ? <>{values.length > 0 && <dl className="finding-values">{values.map(([key, value]) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{readable(value)}</dd></div>)}</dl>}{item.result.summary && item.result.summary.trim() !== chunk.content.trim() && !/^insufficient context\b/i.test(item.result.summary.trim()) && <p className="finding-summary">{item.result.summary}</p>}{!values.length && (!item.result.summary || /^insufficient context\b/i.test(item.result.summary.trim())) && <p>No useful findings extracted. Review parsed content.</p>}</> : <p>AI findings are not available for this part. See parsed content.</p>
                 : chunk.element_type === 'table' ? <TableEvidence content={chunk.content} /> : chunk.element_type === 'image' ? <FigureEvidence chunk={chunk} /> : <div className="parsed-text">{chunk.content.split(/\n\s*\n/).filter(Boolean).map((part, i) => <p key={i}>{part}</p>)}</div>}
               <div className="evidence-foot"><button disabled={!chunk.bbox} onClick={() => locate(chunk)}>{chunk.bbox ? 'Locate on page' : 'Page location unavailable'}</button><button onClick={() => setTab(tab === 'findings' ? 'source' : 'findings')}>{tab === 'findings' ? 'View parsed content' : 'View AI findings'} <ChevronRight size={14} /></button></div>
             </article>
@@ -194,6 +194,6 @@ export default function DocumentWorkspace({ document, extraction, loading, demo,
         </div>
       </section>
     </div>
-    {chatOpen && <DocumentChat key={document.document_id} documentId={document.document_id} filename={document.filename} demo={demo} onClose={() => setChatOpen(false)} onSignIn={onSignIn} onSource={id => { setChatOpen(false); onSource(id) }} />}
+    {chatOpen && <DocumentChatBoundary key={document.document_id} onClose={() => setChatOpen(false)}><DocumentChat documentId={document.document_id} filename={document.filename} demo={demo} onClose={() => setChatOpen(false)} onSignIn={onSignIn} onSource={id => { setChatOpen(false); onSource(id) }} /></DocumentChatBoundary>}
   </div>
 }

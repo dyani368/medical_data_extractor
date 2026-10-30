@@ -73,6 +73,9 @@ body { font-size: 15px; }
 .document-chat-form input { flex: 1; min-width: 0; padding: 10px; border: 1px solid #d6ded4; border-radius: 6px; font: inherit; }
 .document-chat-form button { width: 40px; border: 0; border-radius: 6px; background: #293f35; color: #fff; cursor: pointer; }
 .document-chat-form button:disabled { opacity: .45; cursor: default; }
+.document-chat-fallback { height: auto; padding: 20px; gap: 12px; }
+.document-chat-fallback p { margin: 0; }
+.document-chat-fallback button { align-self: flex-start; border: 1px solid #ccd5ca; border-radius: 5px; padding: 7px 12px; background: #fff; cursor: pointer; }
 .topbar { height: 62px; background: #fff; padding: 0 38px; }
 .breadcrumb, .breadcrumb strong { color: #444e46; font-size: 13px; }
 .breadcrumb-muted { color: #818b80; }
