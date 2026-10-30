@@ -385,7 +385,18 @@ async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_p
                                type(error).__name__)
                 content = streamed or content
         else:
-            yield f"data: {content}\n\n"
+            streamed = ""
+            try:
+                async for chunk in llm_provider.run_agent_stream(messages):
+                    yield chunk
+                    if chunk.startswith("data: "):
+                        streamed += chunk[6:].removesuffix("\n\n")
+            except Exception as error:
+                logger.warning("Follow-up text stream failed after %s characters (%s)", len(streamed),
+                               type(error).__name__)
+            content = streamed or content
+            if not streamed:
+                yield f"data: {content}\n\n"
         yield f"event: sources\ndata: {json.dumps(cited_sources(content, previous_sources))}\n\n"
         save_message(db, conv.id, "assistant", content)
         return

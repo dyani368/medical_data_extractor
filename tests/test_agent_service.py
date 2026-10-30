@@ -146,13 +146,16 @@ async def test_followup_reuses_owned_evidence_when_new_search_is_empty(
         SimpleNamespace(tool_calls=None, content=answer),
     ]))
     async def stream_answer(messages):
-        yield f"data: {answer}\n\n"
+        midpoint = len(answer) // 2
+        yield f"data: {answer[:midpoint]}\n\n"
+        yield f"data: {answer[midpoint:]}\n\n"
     provider.run_agent_stream = stream_answer
     if stream:
         output = "".join([chunk async for chunk in agent_service.run_clinical_agent_stream(
             "Did the patient report chest pain?", 42, db, provider, conversation_id=123
         )])
-        assert answer in output
+        assert "".join(part.removeprefix("data: ") for part in output.split("\n\n")
+                       if part.startswith("data: ")) == answer
         assert '"document_id": 33' in output
     else:
         result = await agent_service.run_clinical_agent(
