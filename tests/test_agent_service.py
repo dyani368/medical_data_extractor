@@ -13,7 +13,7 @@ def conversation_stubs(monkeypatch):
     monkeypatch.setattr(
         agent_service,
         "get_or_create_conversation",
-        lambda db, user_id, conversation_id: SimpleNamespace(id=123),
+        lambda db, user_id, conversation_id, source_document_id=None: SimpleNamespace(id=123),
     )
     monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: None)
     monkeypatch.setattr(
@@ -84,6 +84,15 @@ def test_invalid_tool_arguments_use_the_original_query(arguments):
     db = object()
     assert agent_service.search_tool_arguments(arguments, "original", 42, db) == {
         "query": "original", "limit": 5, "user_id": 42, "db": db,
+    }
+
+
+def test_model_cannot_change_selected_document_scope():
+    db = object()
+    arguments = '{"query":"amount","source_document_id":"another-upload","user_id":99}'
+    assert agent_service.search_tool_arguments(arguments, "original", 42, db, "selected-upload") == {
+        "query": "amount", "limit": 5, "user_id": 42, "db": db,
+        "source_document_id": "selected-upload",
     }
 
 

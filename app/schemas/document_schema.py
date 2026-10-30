@@ -24,6 +24,7 @@ class ResultResponse(ExtractionResult):
 class SearchRequest(BaseModel):
     query: str
     conversation_id: int | None = None
+    document_id: str | None = None
 
 
 

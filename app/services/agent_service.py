@@ -52,7 +52,7 @@ def cited_sources(answer, candidates):
     return list({source["document_id"]: source for source in candidates if source["document_id"] in ids}.values())
 
 
-def load_previous_evidence(messages, user_id, db):
+def load_previous_evidence(messages, user_id, db, source_document_id=None):
     """Reload tool-result references, never trust assistant prose as evidence."""
     ids = set()
     for message in messages:
@@ -60,9 +60,14 @@ def load_previous_evidence(messages, user_id, db):
             ids.update(int(value) for value in re.findall(r"\[doc:(\d+)\]", message.get("content") or ""))
     if not ids:
         return "", []
-    docs = db.execute(select(Document).where(
+    statement = select(Document).where(
         Document.user_id == user_id, Document.id.in_(sorted(ids))
-    ).order_by(Document.id).limit(10)).scalars().all()
+    )
+    if source_document_id:
+        statement = statement.where(Document.id == int(source_document_id[7:])
+                                    if source_document_id.startswith("legacy-") else
+                                    Document.source_document_id == source_document_id)
+    docs = db.execute(statement.order_by(Document.id).limit(10)).scalars().all()
     return format_search_results(docs)
 
 
@@ -117,7 +122,7 @@ def load_visual_evidence(sources, user_id, db):
     return visuals
 
 
-def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Session) -> dict:
+def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Session, source_document_id=None) -> dict:
     """Only the search text is accepted from the model; scope is server owned."""
     try:
         arguments = json.loads(raw_arguments)
@@ -128,13 +133,17 @@ def search_tool_arguments(raw_arguments: str, query: str, user_id: int, db: Sess
     search_query = arguments.get("query")
     if not isinstance(search_query, str) or not search_query.strip():
         search_query = query
-    return {"query": search_query, "limit": 5, "user_id": user_id, "db": db}
+    kwargs = {"query": search_query, "limit": 5, "user_id": user_id, "db": db}
+    if source_document_id:
+        kwargs["source_document_id"] = source_document_id
+    return kwargs
 
 
-def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, db: Session):
+def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, db: Session,
+                       source_document_id=None):
     args = agent_tools.parse_arguments(raw_arguments)
     if name == "search_medical_records":
-        kwargs = search_tool_arguments(raw_arguments, query, user_id, db)
+        kwargs = search_tool_arguments(raw_arguments, query, user_id, db, source_document_id)
         search_tool = TOOL_REGISTRY.get(name)
         # Keep the production retrieval implementation as the default, while
         # dispatching through the registry so tests and configured tool
@@ -146,15 +155,29 @@ def execute_agent_tool(name: str, raw_arguments: str, query: str, user_id: int, 
     document_id = args.get("document_id")
     if isinstance(document_id, bool) or not isinstance(document_id, int):
         return "A valid document_id from your search results is required.", []
+    if source_document_id:
+        allowed = db.execute(select(Document.id).where(
+            Document.id == document_id, Document.user_id == user_id,
+            Document.id == int(source_document_id[7:]) if source_document_id.startswith("legacy-")
+            else Document.source_document_id == source_document_id,
+        )).scalar_one_or_none()
+        if allowed is None:
+            return "That passage is outside the selected document.", []
     if name == "get_extraction_result":
         content, sources = agent_tools.get_extraction_result(document_id, user_id, db)
         return redact_text(content), sources
     if name == "get_related_document_chunks":
-        return format_search_results(agent_tools.get_related_document_chunks(document_id, user_id, db))
+        docs = agent_tools.get_related_document_chunks(document_id, user_id, db)
+        if source_document_id:
+            docs = [doc for doc in docs if (doc.id == int(source_document_id[7:])
+                    if source_document_id.startswith("legacy-") else
+                    doc.source_document_id == source_document_id)]
+        return format_search_results(docs)
     return "Unsupported tool.", []
 
 
-async def execute_agent_tool_rounds(messages, response_message, query, user_id, db, llm_provider, conversation_id, initial_sources):
+async def execute_agent_tool_rounds(messages, response_message, query, user_id, db, llm_provider, conversation_id,
+                                    initial_sources, source_document_id=None):
     """Run a bounded sequence of model-selected tools with server-owned scope."""
     sources = list(initial_sources)
     tool_failed = False
@@ -193,7 +216,8 @@ async def execute_agent_tool_rounds(messages, response_message, query, user_id, 
                 db.add(audit_log)
                 try:
                     tool_result, found_sources = await run_blocking(execute_agent_tool,
-                        call.function.name, call.function.arguments, query, user_id, db
+                        call.function.name, call.function.arguments, query, user_id, db,
+                        source_document_id
                     )
                     sources.extend(found_sources)
                     sources = list({source["document_id"]: source for source in sources}.values())
@@ -225,20 +249,24 @@ async def execute_agent_tool_rounds(messages, response_message, query, user_id, 
             response_message = await llm_provider.run_agent(messages, require_tool=False)
     return response_message, sources, tool_failed
 
-async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None) -> dict:
+async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None,
+                             source_document_id: str | None = None) -> dict:
     query = await run_blocking(redact_text, query)
-    conv = get_or_create_conversation(db, user_id, conversation_id)
+    conv = get_or_create_conversation(db, user_id, conversation_id, source_document_id)
 
     # Save user message
     save_message(db, conv.id, "user", query)
 
     # Get history with sliding window (e.g., last 10 messages) to prevent context bloat
     messages = get_conversation_history(db, conv.id, limit=10)
+    if source_document_id:
+        messages.append({"role": "system", "content": "This question is restricted to the selected document. Search and cite only its passages. Do not use passages from other uploads."})
     refusal = await check_access_policy(messages, llm_provider)
     if refusal:
         save_message(db, conv.id, "assistant", refusal)
         return {"response": refusal, "conversation_id": conv.id, "sources": []}
-    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db)
+    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db,
+                                                              source_document_id)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
     # Retrieval is required for the first model turn. Otherwise a model may answer
@@ -247,7 +275,8 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
 
     if response_message.tool_calls:
         response_message, sources, search_failed = await execute_agent_tool_rounds(
-            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources
+            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources,
+            source_document_id
         )
         if not sources:
             refusal = SEARCH_FAILED if search_failed else NO_EVIDENCE
@@ -285,26 +314,31 @@ async def run_clinical_agent(query: str, user_id: int, db: Session, llm_provider
 
     return {"response": NO_EVIDENCE, "conversation_id": conv.id, "sources": []}
 
-async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None):
+async def run_clinical_agent_stream(query: str, user_id: int, db: Session, llm_provider, conversation_id: int = None,
+                                    source_document_id: str | None = None):
     query = await run_blocking(redact_text, query)
-    conv = get_or_create_conversation(db, user_id, conversation_id)
+    conv = get_or_create_conversation(db, user_id, conversation_id, source_document_id)
     yield f'event: conversation\ndata: {json.dumps({"conversation_id": conv.id})}\n\n'
     save_message(db, conv.id, "user", query)
     messages = get_conversation_history(db, conv.id, limit=10)
+    if source_document_id:
+        messages.append({"role": "system", "content": "This question is restricted to the selected document. Search and cite only its passages. Do not use passages from other uploads."})
     refusal = await check_access_policy(messages, llm_provider)
     if refusal:
         save_message(db, conv.id, "assistant", refusal)
         yield f"event: sources\ndata: []\n\n"
         yield f"data: {refusal}\n\n"
         return
-    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db)
+    previous_passages, previous_sources = await run_blocking(load_previous_evidence, messages, user_id, db,
+                                                              source_document_id)
     add_previous_evidence(messages, previous_passages, previous_sources)
 
     response_message = await llm_provider.run_agent(messages, require_tool=None if previous_sources else True)
 
     if response_message.tool_calls:
         response_message, sources, search_failed = await execute_agent_tool_rounds(
-            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources
+            messages, response_message, query, user_id, db, llm_provider, conv.id, previous_sources,
+            source_document_id
         )
         if not sources:
             refusal = SEARCH_FAILED if search_failed else NO_EVIDENCE

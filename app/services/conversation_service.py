@@ -5,13 +5,16 @@ from app.models.conversation_model import Conversation, Message
 from app.schemas.document_schema import SearchRequest
 from fastapi import HTTPException
 
-def get_or_create_conversation(db: Session, user_id: int, conversation_id: int = None) -> Conversation:
+def get_or_create_conversation(db: Session, user_id: int, conversation_id: int = None,
+                               source_document_id: str | None = None) -> Conversation:
     if conversation_id is not None:
         conv = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.user_id == user_id).first()
         if conv:
+            if conv.source_document_id != source_document_id:
+                raise HTTPException(status_code=400, detail="Conversation belongs to a different document scope")
             return conv
         raise HTTPException(status_code=404, detail="Conversation not found")
-    new_conv = Conversation(user_id=user_id)
+    new_conv = Conversation(user_id=user_id, source_document_id=source_document_id)
     db.add(new_conv)
     db.commit()
     db.refresh(new_conv)

@@ -40,10 +40,11 @@ export function newKey() {
 
 export async function streamChat(query: string, conversationId: number | undefined, signal: AbortSignal, handlers: {
   text: (text: string) => void; sources: (sources: Source[]) => void; conversation: (id: number) => void
-}) {
+}, documentId?: string) {
   const response = await fetch('/api/chat/stream', { method: 'POST', signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query, ...(conversationId ? { conversation_id: conversationId } : {}) }) })
+    body: JSON.stringify({ query, ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(documentId ? { document_id: documentId } : {}) }) })
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event('session-expired'))
     const body = await response.json().catch(() => ({}))

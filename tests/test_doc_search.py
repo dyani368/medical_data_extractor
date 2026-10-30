@@ -48,3 +48,20 @@ def test_long_question_uses_bounded_or_query_when_exact_terms_find_nothing(monke
     assert "documents.user_id =" in str(fallback)
     assert any("total | short | term | net | gain | or | loss" in str(value)
                for value in fallback.params.values())
+
+
+def test_document_scope_applies_to_every_retrieval_query(monkeypatch):
+    monkeypatch.setattr(doc_search, "embed_text", lambda query: [0.0] * 384)
+    db = MagicMock()
+    db.execute.return_value.scalars.return_value.all.return_value = []
+
+    doc_search.generate_relevant_docs("reported amount", 5, 42, db,
+                                      source_document_id="selected-upload")
+
+    assert db.execute.call_count == 3
+    for call in db.execute.call_args_list:
+        compiled = call.args[0].compile(dialect=postgresql.dialect())
+        assert "documents.user_id =" in str(compiled)
+        assert "documents.source_document_id =" in str(compiled)
+        assert 42 in compiled.params.values()
+        assert "selected-upload" in compiled.params.values()

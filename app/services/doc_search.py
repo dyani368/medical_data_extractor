@@ -16,7 +16,8 @@ def fuse_rankings(vector_docs, keyword_docs, limit):
     ordered = sorted(scores, key=lambda doc_id: (-scores[doc_id], doc_id))
     return [documents[doc_id] for doc_id in ordered[:limit]]
 
-def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, threshold: float | None = None):
+def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, threshold: float | None = None,
+                           source_document_id: str | None = None):
     """Return ranked candidates, not a claim that they contain the answer.
 
     A fixed MiniLM cosine cutoff rejected real answer passages. By default search
@@ -27,10 +28,15 @@ def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, th
     candidate_limit = max(20, limit)
     query_vector = embed_text(query)
     distance = document_model.Document.embedding.cosine_distance(query_vector)
+    scope_filter = (document_model.Document.id == int(source_document_id[7:])
+                    if source_document_id and source_document_id.startswith("legacy-") else
+                    document_model.Document.source_document_id == source_document_id)
     stmt = select(document_model.Document).where(
         document_model.Document.user_id == user_id,
         document_model.Document.embedding.is_not(None),
     )
+    if source_document_id:
+        stmt = stmt.where(scope_filter)
     if threshold is not None:
         stmt = stmt.where(distance <= threshold)
         return db.execute(stmt.order_by(distance, document_model.Document.id).limit(limit)).scalars().all()
@@ -39,8 +45,12 @@ def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, th
     lexemes = func.to_tsvector('english', search_text)
     terms = func.plainto_tsquery('english', query)
     keyword_stmt = select(document_model.Document).where(
-        document_model.Document.user_id == user_id, lexemes.op('@@')(terms)
-    ).order_by(func.ts_rank_cd(lexemes, terms).desc(), document_model.Document.id).limit(candidate_limit)
+        document_model.Document.user_id == user_id, lexemes.op('@@')(terms),
+    )
+    if source_document_id:
+        keyword_stmt = keyword_stmt.where(scope_filter)
+    keyword_stmt = keyword_stmt.order_by(func.ts_rank_cd(lexemes, terms).desc(),
+                                         document_model.Document.id).limit(candidate_limit)
     keyword_docs = db.execute(keyword_stmt).scalars().all()
     if not keyword_docs:
         # plainto_tsquery joins every term with AND. Long questions often have no
@@ -50,7 +60,11 @@ def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, th
         if words:
             broad_terms = func.to_tsquery('english', ' | '.join(words))
             broad_stmt = select(document_model.Document).where(
-                document_model.Document.user_id == user_id, lexemes.op('@@')(broad_terms)
-            ).order_by(func.ts_rank_cd(lexemes, broad_terms).desc(), document_model.Document.id).limit(candidate_limit)
+                document_model.Document.user_id == user_id, lexemes.op('@@')(broad_terms),
+            )
+            if source_document_id:
+                broad_stmt = broad_stmt.where(scope_filter)
+            broad_stmt = broad_stmt.order_by(func.ts_rank_cd(lexemes, broad_terms).desc(),
+                                              document_model.Document.id).limit(candidate_limit)
             keyword_docs = db.execute(broad_stmt).scalars().all()
     return fuse_rankings(vector_docs, keyword_docs, limit)

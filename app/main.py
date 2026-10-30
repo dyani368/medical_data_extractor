@@ -445,9 +445,11 @@ def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    total = db.query(Conversation).filter(Conversation.user_id == current_user.id).count()
+    total = db.query(Conversation).filter(Conversation.user_id == current_user.id,
+                                          Conversation.source_document_id.is_(None)).count()
     conversations = db.execute(
-        select(Conversation).where(Conversation.user_id == current_user.id)
+        select(Conversation).where(Conversation.user_id == current_user.id,
+                                   Conversation.source_document_id.is_(None))
         .order_by(desc(Conversation.updated_at), desc(Conversation.id)).offset(offset).limit(limit)
     ).scalars().all()
     conversation_ids = [conversation.id for conversation in conversations]
@@ -493,7 +495,10 @@ async def semantic_search(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[user_model.User, Depends(get_current_user)]
 ):
-    similar_docs = await run_blocking(doc_search.generate_relevant_docs, request.query, 5, current_user.id, db)
+    if request.document_id:
+        _document_group_rows(request.document_id, current_user.id, db)
+    similar_docs = await run_blocking(doc_search.generate_relevant_docs, request.query, 5, current_user.id, db,
+                                      None, request.document_id)
 
     return [
         {"id": doc.id, "filename": doc.filename, "content": doc.raw_content,
@@ -507,11 +512,14 @@ def chat_stream(
     current_user: Annotated[user_model.User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
+    if request.document_id:
+        _document_group_rows(request.document_id, current_user.id, db)
     async def stream_events():
         try:
             async for event in run_clinical_agent_stream(
                 query=request.query, user_id=current_user.id, db=db,
                 llm_provider=llm_provider, conversation_id=request.conversation_id,
+                source_document_id=request.document_id,
             ):
                 if event.startswith('data: '):
                     payload = event[6:-2] if event.endswith('\n\n') else event[6:]
@@ -534,11 +542,14 @@ async def chat_agent(
     current_user: Annotated[user_model.User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
+    if request.document_id:
+        _document_group_rows(request.document_id, current_user.id, db)
     result = await run_clinical_agent(
         query=request.query,
         user_id=current_user.id,
         db=db,
         llm_provider=llm_provider,
-        conversation_id=request.conversation_id
+        conversation_id=request.conversation_id,
+        source_document_id=request.document_id,
     )
     return result
