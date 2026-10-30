@@ -40,10 +40,13 @@ def _chunk_elements(elements):
             text = "\n".join(item["text"] for item in pending)
             titles = {item.get("section_title") for item in pending if item.get("section_title")}
             title = titles.pop() if len(titles) == 1 else None
+            boxes = [item["bbox"] for item in pending if item.get("bbox") and len(item["bbox"]) == 4]
+            bounds = [min(box[0] for box in boxes), min(box[1] for box in boxes),
+                      max(box[2] for box in boxes), max(box[3] for box in boxes)] if boxes else None
             for part in splitter.split_text(text):
                 chunks.append({"page_number": pending_page, "element_type": "text",
                                "section_title": title, "text": part, "visual_assets": [],
-                               "bbox": None})
+                               "bbox": bounds})
         pending, pending_page, pending_length = [], None, 0
 
     for element in elements:
@@ -70,7 +73,7 @@ def _chunk_elements(elements):
             if pending and (page != pending_page or pending_length + len(text) + 1 > 900):
                 flush_text()
             pending_page = page
-            pending.append({"text": text, "section_title": title})
+            pending.append({"text": text, "section_title": title, "bbox": element.get("bbox")})
             pending_length += len(text) + 1
             continue
         flush_text()

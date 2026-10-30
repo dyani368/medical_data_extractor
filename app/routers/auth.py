@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 from typing import Annotated
 
 from fastapi.security import OAuth2PasswordRequestForm
@@ -45,12 +45,14 @@ def register(new_user: user_schema.UserCreate, db: Annotated[Session, Depends(ge
 @router.post("/token", response_model=user_schema.Token)
 def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Annotated[Session, Depends(get_db)]):
 
-    result1 = db.execute(select(User).where(User.username==form_data.username)).scalars().first()
+    identifier = form_data.username.strip()
+    match = func.lower(User.email) == identifier.lower() if "@" in identifier else User.username == identifier
+    result1 = db.execute(select(User).where(match)).scalars().first()
     
     if not result1 or not security.verify_password(form_data.password,result1.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid username or password",
+            detail="invalid email, username, or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
     

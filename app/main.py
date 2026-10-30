@@ -359,8 +359,8 @@ def _render_document_page(path: Path, page_number: int):
 
 @app.get("/samples/{sample_name}/pages/{page_number}/preview")
 def get_sample_page_preview(sample_name: str, page_number: int):
-    """The two bundled, invented examples can be previewed without an account."""
-    if sample_name not in {"cardiovascular-followup", "adverse-event-report"}:
+    """Only bundled, fictional examples can be previewed without an account."""
+    if sample_name not in {"cardiovascular-followup", "adverse-event-report", "project-status"}:
         raise HTTPException(status_code=404, detail="Sample not found")
     path = Path(__file__).resolve().parent.parent / "frontend" / "public" / "samples" / f"{sample_name}.pdf"
     if not path.is_file():

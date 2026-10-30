@@ -38,3 +38,12 @@ def test_adjacent_pdf_text_keeps_table_header_and_value_together():
     assert chunks[0]["page_number"] == 1
     assert "Net gain or loss (-)\nTotal Short-term\n0.64" == chunks[0]["text"]
     assert chunks[1]["page_number"] == 2
+
+
+def test_grouped_text_retains_source_page_region():
+    chunks = _chunk_elements([
+        {"page_number": 1, "element_type": "text", "text": "First finding", "bbox": [45, 80, 250, 110]},
+        {"page_number": 1, "element_type": "text", "text": "Second finding", "bbox": [50, 120, 290, 145]},
+    ])
+    assert len(chunks) == 1
+    assert chunks[0]["bbox"] == [45, 80, 290, 145]
