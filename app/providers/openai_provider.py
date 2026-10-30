@@ -199,15 +199,29 @@ class OpenAIProvider(LLMProvider):
             )
         }
 
-        full_message = [system_message] + message
+        if require_tool is False:
+            system_message["content"] += " No tools remain for this turn. Give the final answer from the evidence already provided, or state that it is insufficient."
+            # Groq can still try to continue a previous assistant tool call when
+            # its structured tool transcript is included in a tool-free turn.
+            # Retain the actual retrieved evidence as plain content instead.
+            final_context = []
+            for item in message:
+                role, content = item.get("role"), item.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                if role == "tool":
+                    final_context.append({"role": "user", "content": "Retrieved evidence:\n" + content})
+                elif role in {"user", "assistant", "system"} and not item.get("tool_calls"):
+                    final_context.append({"role": role, "content": content})
+            full_message = [system_message] + final_context
+        else:
+            full_message = [system_message] + message
 
         try:
-            response = await client.chat.completions.create(
-                            model="openai/gpt-oss-20b",
-                            messages=full_message,
-                            tools=tools,
-                            tool_choice="auto" if require_tool is None else ("required" if require_tool else "none")
-                    )
+            request = {"model": "openai/gpt-oss-20b", "messages": full_message}
+            if require_tool is not False:
+                request.update(tools=tools, tool_choice="auto" if require_tool is None else "required")
+            response = await client.chat.completions.create(**request)
         except openai.BadRequestError as error:
             body = error.body if isinstance(error.body, dict) else {}
             detail = body.get("error", body)

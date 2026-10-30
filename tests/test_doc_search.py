@@ -33,3 +33,18 @@ def test_explicit_cutoff_is_opt_in(monkeypatch):
     doc_search.generate_relevant_docs("query", 2, 42, db, threshold=0.45)
     assert db.execute.call_count == 1
     assert 0.45 in db.execute.call_args.args[0].compile().params.values()
+
+
+def test_long_question_uses_bounded_or_query_when_exact_terms_find_nothing(monkeypatch):
+    monkeypatch.setattr(doc_search, "embed_text", lambda query: [0.0] * 384)
+    db = MagicMock()
+    db.execute.return_value.scalars.return_value.all.return_value = []
+    doc_search.generate_relevant_docs(
+        "What was the total short-term net gain or loss on the Summary Information page?",
+        5, 42, db,
+    )
+    assert db.execute.call_count == 3
+    fallback = db.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert "documents.user_id =" in str(fallback)
+    assert any("total | short | term | net | gain | or | loss" in str(value)
+               for value in fallback.params.values())

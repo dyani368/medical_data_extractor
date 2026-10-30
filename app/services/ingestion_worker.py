@@ -25,11 +25,27 @@ def sanitize(text):
 
 
 def _chunk_elements(elements):
-    """Split text/table elements independently and retain ordered visual references."""
+    """Keep nearby text on a page together so table labels and values share context."""
     if isinstance(elements, str):
         elements = [(None, elements)]
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=120)
     chunks = []
+    pending = []
+    pending_page = None
+    pending_length = 0
+
+    def flush_text():
+        nonlocal pending, pending_page, pending_length
+        if pending:
+            text = "\n".join(item["text"] for item in pending)
+            titles = {item.get("section_title") for item in pending if item.get("section_title")}
+            title = titles.pop() if len(titles) == 1 else None
+            for part in splitter.split_text(text):
+                chunks.append({"page_number": pending_page, "element_type": "text",
+                               "section_title": title, "text": part, "visual_assets": [],
+                               "bbox": None})
+        pending, pending_page, pending_length = [], None, 0
+
     for element in elements:
         if isinstance(element, (tuple, list)):
             page, text = element
@@ -40,6 +56,7 @@ def _chunk_elements(elements):
         kind = element.get("element_type", "text")
         title = element.get("section_title")
         if kind == "image":
+            flush_text()
             chunks.append({"page_number": page, "element_type": "image", "section_title": title,
                            "text": "", "context_text": element.get("context_text", ""),
                            "visual_assets": [{"asset_ref": element["asset_ref"],
@@ -49,10 +66,19 @@ def _chunk_elements(elements):
         text = element.get("text", "").strip()
         if not text:
             continue
+        if kind == "text":
+            if pending and (page != pending_page or pending_length + len(text) + 1 > 900):
+                flush_text()
+            pending_page = page
+            pending.append({"text": text, "section_title": title})
+            pending_length += len(text) + 1
+            continue
+        flush_text()
         for part in splitter.split_text(text):
             chunks.append({"page_number": page, "element_type": kind,
                            "section_title": title, "text": part, "visual_assets": [],
                            "bbox": element.get("bbox")})
+    flush_text()
     return chunks
 
 

@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
@@ -40,4 +42,15 @@ def generate_relevant_docs(query: str, limit: int, user_id: int, db: Session, th
         document_model.Document.user_id == user_id, lexemes.op('@@')(terms)
     ).order_by(func.ts_rank_cd(lexemes, terms).desc(), document_model.Document.id).limit(candidate_limit)
     keyword_docs = db.execute(keyword_stmt).scalars().all()
+    if not keyword_docs:
+        # plainto_tsquery joins every term with AND. Long questions often have no
+        # single passage containing every word, especially across PDF table cells.
+        # A bounded OR query recovers lexical candidates for fusion with vectors.
+        words = list(dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower())))[:16]
+        if words:
+            broad_terms = func.to_tsquery('english', ' | '.join(words))
+            broad_stmt = select(document_model.Document).where(
+                document_model.Document.user_id == user_id, lexemes.op('@@')(broad_terms)
+            ).order_by(func.ts_rank_cd(lexemes, broad_terms).desc(), document_model.Document.id).limit(candidate_limit)
+            keyword_docs = db.execute(broad_stmt).scalars().all()
     return fuse_rankings(vector_docs, keyword_docs, limit)
